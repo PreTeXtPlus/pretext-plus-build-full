@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pretext>
+  <article xml:id="sample-article">
+    <title>Sample Document</title>
+    <introduction>
+      <p>
+        Hello from the full build server. Here is some math:
+        <me>x^2 + y^2 = z^2</me>.
+      </p>
+    </introduction>
+    <section xml:id="sec-first">
+      <title>A Section</title>
+      <p>If you can read this in the built output, the toolchain works.</p>
+    </section>
+  </article>
+</pretext>

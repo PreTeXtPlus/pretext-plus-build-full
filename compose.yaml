@@ -1,0 +1,44 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    depends_on:
+      - redis
+    # NOTE: the API deliberately has NO access to the Docker socket. Only the
+    # worker can spawn build containers.
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      # Absolute host path of ./data, so the worker can translate per-job dirs
+      # when bind-mounting them into sibling build containers. Set by `make up`
+      # (or `export HOST_DATA_DIR=$PWD/data` before `docker compose up`).
+      HOST_DATA_DIR: ${HOST_DATA_DIR}
+    command: ["rq", "worker", "-u", "redis://redis:6379/0", "builds"]
+    volumes:
+      - ./data:/data
+      # Docker-out-of-Docker: lets the worker create sibling build containers
+      # on the host daemon. DOCKER_SOCK defaults to the standard Linux path
+      # (correct on a droplet); override it for Docker Desktop — see README.
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+    depends_on:
+      - redis
+
+volumes:
+  redis-data:

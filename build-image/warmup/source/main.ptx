@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pretext>
+  <docinfo>
+    <latex-image-preamble>
+      \usepackage{tikz, pgfplots}
+    </latex-image-preamble>
+  </docinfo>
+  <article xml:id="warmup">
+    <title>Warmup</title>
+    <section xml:id="sec-warmup">
+      <title>Warmup Section</title>
+      <p>Inline math <m>x^2 + y^2 = z^2</m> forces MathJax/static asset setup.</p>
+      <figure>
+        <caption>A latex-image forces the asset-generation (npm) pipeline.</caption>
+        <image xml:id="fig-warmup">
+          <latex-image>
+            \begin{tikzpicture}
+              \draw[thick] (0,0) -- (2,1) -- (1,2) -- cycle;
+            \end{tikzpicture}
+          </latex-image>
+        </image>
+      </figure>
+    </section>
+  </article>
+</pretext>
