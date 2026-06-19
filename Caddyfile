@@ -1,0 +1,20 @@
+# Caddy sits in front of the build API as the public entrypoint. It does two
+# jobs: terminate TLS (HTTPS) and reverse-proxy requests to the FastAPI
+# container. The API itself only speaks plain HTTP on the internal network.
+#
+# SITE_ADDRESS (from .env) decides how Caddy serves:
+#   :80                  -> plain HTTP, no certs — good for local testing (default)
+#   build.pretext.plus   -> automatic HTTPS via Let's Encrypt, with 80->443
+#                           redirect. Requires a real domain pointing at this host.
+{$SITE_ADDRESS::80} {
+	# Forward all requests to the api service over the internal compose network.
+	# "api" resolves via Docker DNS; 8000 is the container port, not published
+	# to the public internet.
+	reverse_proxy api:8000
+
+	# PreTeXt project archives can be large; raise the upload cap (Caddy's
+	# default is generous, but be explicit so big projects don't get rejected).
+	request_body {
+		max_size 100MB
+	}
+}

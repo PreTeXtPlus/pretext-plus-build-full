@@ -5,14 +5,31 @@ services:
     volumes:
       - redis-data:/data
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data       # persists issued TLS certs across restarts
+      - caddy-config:/config
+    depends_on:
+      - api
+
   api:
     build: .
     restart: unless-stopped
     env_file: .env
     environment:
       DATA_DIR: /data
+    # Bound to loopback only: the public entrypoint is Caddy. localhost:8000
+    # still works on this host (e.g. `make test`), but the API is not exposed
+    # on the public interface. Caddy reaches it via the internal network.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/data
     depends_on:
@@ -42,3 +59,5 @@ services:
 
 volumes:
   redis-data:
+  caddy-data:
+  caddy-config:
