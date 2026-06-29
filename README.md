@@ -98,12 +98,19 @@ pinned runestone/npm assets later, re-run `make warm-image`. See
 - `archive` — `.zip` or `.tar.gz` of the project root (the dir with `project.ptx`)
 - `target` — the PreTeXt target name to build (e.g. `web`)
 - `token` — the shared `BUILD_TOKEN` (or send `Authorization: Bearer <token>`)
+- `callback_url` *(optional)* — when set, the worker POSTs the final job status
+  here once the build finishes, so the caller can react immediately instead of
+  polling `GET /builds/{id}`. The body is HMAC-signed with `CALLBACK_SECRET`
+  (header `X-PreTeXt-Signature: sha256=<hex>`) so the receiver can verify it;
+  the secret itself is never sent. URLs that resolve to internal/private
+  addresses are rejected (SSRF guard). See `CALLBACK_*` in [Configuration](#configuration).
 
 Example:
 
 ```bash
 curl -X POST http://localhost:8000/builds \
   -F token=testtoken -F target=web \
+  -F callback_url=https://pretext.plus/api/build-complete \
   -F 'archive=@project.zip;type=application/zip'
 ```
 
@@ -191,3 +198,18 @@ compose stack with zero cert management.)
 
 All settings are environment variables — see [.env.example](.env.example) for
 the full list (auth, build image/command, sandbox limits, storage TTL).
+
+### Completion-callback security
+
+`callback_url` is supplied by the build submitter, so the worker treats it as
+untrusted. **In production, set `CALLBACK_ALLOWED_HOSTS` to the host(s) you
+actually call back** (e.g. `pretext.plus`) — this is the primary SSRF control:
+with it set, the worker will only POST to that host and nowhere else.
+
+As a backstop for the no-allowlist case, callback URLs that resolve to
+loopback/private/link-local/reserved IPs are rejected, redirects are disabled,
+and the URL is re-validated immediately before the POST. Note this backstop
+cannot fully prevent DNS-rebinding (the host can re-resolve between validation
+and connection); the allowlist closes that gap, which is why it's the
+recommended production control. Set `CALLBACK_ALLOW_PRIVATE_IPS=true` only for
+local dev with a localhost/private receiver.

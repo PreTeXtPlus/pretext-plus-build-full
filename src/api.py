@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 
 from .config import settings
 from .jobs import queue, store
+from .notify import is_allowed_callback_url
 
 app = FastAPI(title="PreTeXt Plus — Full Build Server")
 
@@ -56,9 +57,13 @@ async def create_build(
     archive: UploadFile = File(...),
     target: str = Form(...),
     token: str | None = Form(None),
+    callback_url: str | None = Form(None),
     authorization: str | None = Header(None),
 ):
     _check_token(token, authorization)
+
+    if callback_url is not None and not is_allowed_callback_url(callback_url):
+        raise HTTPException(status_code=422, detail="Invalid or disallowed callback_url")
 
     job_id = uuid.uuid4().hex
     job_dir = os.path.join(settings.data_dir, "jobs", job_id)
@@ -75,7 +80,10 @@ async def create_build(
         raise HTTPException(status_code=422, detail=f"Could not extract archive: {e}")
     os.remove(archive_path)
 
-    store.create(job_id, target=target)
+    fields = {"target": target}
+    if callback_url:
+        fields["callback_url"] = callback_url
+    store.create(job_id, **fields)
     queue.enqueue("src.build.run_build", job_id, target, job_id=job_id)
     return {"job_id": job_id, "status": "queued", "status_url": f"/builds/{job_id}"}
 

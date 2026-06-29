@@ -38,6 +38,32 @@ class Settings:
     # artifact after a successful build.
     output_subdir = os.getenv("OUTPUT_SUBDIR", "output")
 
+    # --- Completion callback (optional webhook) ---
+    # If a /builds request includes a callback_url, the worker POSTs the final
+    # job status there once the build reaches a terminal state (success/failed).
+    # Seconds to wait for the callback POST before giving up.
+    callback_timeout = int(os.getenv("CALLBACK_TIMEOUT", "10"))
+    # How many times to attempt the callback POST (>=1).
+    callback_retries = int(os.getenv("CALLBACK_RETRIES", "3"))
+    # Optional comma-separated allowlist of hostnames permitted as callback
+    # targets. Empty = allow any *public* host (callback_url is only reachable
+    # by token holders). Set this in production to pin it, e.g. "pretext.plus".
+    callback_allowed_hosts = [
+        h.strip().lower().rstrip(".")
+        for h in os.getenv("CALLBACK_ALLOWED_HOSTS", "").split(",")
+        if h.strip()
+    ]
+    # SSRF guard: by default, callback URLs that resolve to loopback/private/
+    # link-local/reserved IPs are rejected. Set true ONLY for local dev where
+    # the receiver is on localhost or a private network.
+    callback_allow_private_ips = os.getenv("CALLBACK_ALLOW_PRIVATE_IPS", "").lower() in ("1", "true", "yes")
+    # Secret used to HMAC-sign the callback payload (sent as an X-PreTeXt-
+    # Signature header) so the receiver can verify authenticity. The secret
+    # itself is NEVER transmitted. Falls back to BUILD_TOKEN if unset, but a
+    # dedicated value is preferred so the callback path and the submit path
+    # don't share one credential.
+    callback_secret = os.getenv("CALLBACK_SECRET", "") or build_token
+
     # --- Storage ---
     # Path *inside* the api/worker containers where job data lives.
     data_dir = os.getenv("DATA_DIR", "/data")

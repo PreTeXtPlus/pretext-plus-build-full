@@ -18,6 +18,7 @@ from requests.exceptions import ReadTimeout, ConnectionError as ReqConnectionErr
 
 from .config import settings
 from .jobs import store
+from .notify import send_callback
 
 
 def _now() -> str:
@@ -33,6 +34,18 @@ def _zip_dir(src_dir: str, zip_path: str) -> None:
 
 
 def run_build(job_id: str, target: str) -> None:
+    """Run the build, then fire the completion callback regardless of outcome.
+
+    The callback lives in a `finally` so every terminal path — success, build
+    failure, timeout, misconfig — notifies the initiating host exactly once,
+    and a failing callback never propagates back into the build's status."""
+    try:
+        _run_build(job_id, target)
+    finally:
+        send_callback(job_id)
+
+
+def _run_build(job_id: str, target: str) -> None:
     if not settings.host_data_dir:
         store.update(
             job_id,
