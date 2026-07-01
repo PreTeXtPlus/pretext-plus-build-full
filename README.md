@@ -153,13 +153,30 @@ only once a single Droplet measurably falls behind.
 
 ## Deploy to a Droplet
 
-Start with **4 vCPU / 8 GB** and ample disk (the image alone is several GB).
+### Creating the Droplet (DigitalOcean console)
+
+| Setting | Choice | Why |
+|---|---|---|
+| Image | Ubuntu 24.04 LTS (plain, not the "Docker on Ubuntu" marketplace image) | `provision.sh` installs Docker itself via `get.docker.com`; the marketplace image's snap-based Docker can conflict with it |
+| Droplet type | **Basic** (shared CPU) | The workload is I/O/burst-bound (LaTeX/Sage/npm), not sustained-CPU-bound — no need for CPU-Optimized |
+| Size | **4 vCPU / 8 GB / 160 GB SSD** (~$48/mo) to start | Matches the concurrency assumptions in this README; resize up if builds start queuing |
+| Backups | Optional | Manual snapshots (see below) cover the "rebuild is slow" problem more cheaply |
+| Monitoring | Enable (free) | Watch CPU/mem/disk headroom as concurrent builds run |
+| SSH keys | Add yours at creation | Avoid password auth |
+
+Also create a **DigitalOcean Cloud Firewall** (or rely on `provision.sh`'s `ufw`
+setup below) allowing only 22 (SSH), 80, and 443 — nothing else needs to be
+reachable from the internet.
+
+### Provisioning
 
 ```bash
 git clone <this repo> && cd pretext-plus-build-full
-./scripts/provision.sh        # installs Docker, pre-pulls pretext-full
-make warm-image               # bake in PreTeXt's first-run setup (see above)
-cp .env.example .env          # set a strong BUILD_TOKEN, switch to REAL MODE
+./scripts/provision.sh        # installs Docker, configures ufw (22/80/443 only),
+                               # pre-pulls pretext-full
+make warm-image                # bake in PreTeXt's first-run setup (see above)
+cp .env.example .env           # set a strong BUILD_TOKEN, switch to REAL MODE,
+                               # set SITE_ADDRESS to your domain for HTTPS
 make up
 ```
 
