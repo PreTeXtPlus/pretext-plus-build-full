@@ -5,10 +5,19 @@
 # Requires: curl, zip, unzip, python3.
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 API="${API:-http://localhost:8000}"
-TOKEN="${BUILD_TOKEN:-testtoken}"
 TARGET="${TARGET:-web}"
-SAMPLE_DIR="$(cd "$(dirname "$0")/.." && pwd)/tests/sample"
+SAMPLE_DIR="$ROOT_DIR/tests/sample"
+
+# BUILD_TOKEN in the shell env wins; otherwise fall back to whatever `make up`
+# actually deployed (.env, read by docker compose), so `make test` matches the
+# running stack instead of silently using the "testtoken" default and getting
+# a 401 from a real token set in .env.
+if [ -z "${BUILD_TOKEN:-}" ] && [ -f "$ROOT_DIR/.env" ]; then
+  BUILD_TOKEN="$(sed -n 's/^BUILD_TOKEN=//p' "$ROOT_DIR/.env" | tail -1)"
+fi
+TOKEN="${BUILD_TOKEN:-testtoken}"
 
 jq_get() { python3 -c "import sys,json;print(json.load(sys.stdin).get('$1',''))"; }
 

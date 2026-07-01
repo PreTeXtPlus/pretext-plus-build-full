@@ -15,6 +15,13 @@ fi
 
 if command -v ufw >/dev/null 2>&1; then
   echo "==> Configuring firewall (ufw): allow SSH, 80, 443; deny the rest ..."
+  # This is the host-level firewall, kept permissive on 80/443 (open to
+  # everyone) so it doesn't fight with Caddy/ACME. The actual access
+  # restriction -- since this server is only meant to be called by
+  # pretext.plus, not browsers -- belongs one layer up, in a DigitalOcean
+  # Cloud Firewall that allowlists port 443 to known IPs. See "Restricting
+  # access" in the README.
+  #
   # Allow OpenSSH BEFORE enabling ufw, or a fresh SSH session can get locked
   # out the moment the default-deny policy takes effect.
   ufw allow OpenSSH
@@ -39,11 +46,20 @@ Next steps:
   3. Edit .env:
        - set a strong BUILD_TOKEN
        - switch to REAL MODE (use the pretext-plus-build:warm image)
-       - set SITE_ADDRESS to your domain for automatic HTTPS (e.g. build.pretext.plus)
-  4. Point DNS at this droplet's IP if using a domain
-  5. make up            # build + start caddy, api, worker, redis
-  6. make test          # confirm a real build runs end-to-end
+       - set SITE_ADDRESS to a DEDICATED subdomain for this server, e.g.
+         build-full.pretext.plus (don't reuse the lite server's hostname)
+  4. In Cloudflare, point that subdomain's A record at this droplet's IP with
+     the proxy OFF ("DNS only" / grey cloud) -- see README "Restricting access"
+  5. In the DigitalOcean console, add a Cloud Firewall on this droplet that
+     allows port 443 ONLY from known IPs (your testing IP + whoever calls this
+     server), and leaves port 80 open to everyone (Let's Encrypt needs it, and
+     it never serves anything sensitive)
+  6. make up            # build + start caddy, api, worker, redis
+  7. make test          # confirm a real build runs end-to-end
 
 Caddy (started by `make up`) handles TLS termination on 80/443; the API itself
-is bound to 127.0.0.1 only and is not reachable except through Caddy.
+is bound to 127.0.0.1 only and is not reachable except through Caddy. This
+server is meant to be called machine-to-machine (from pretext.plus), not
+browsed to directly -- restrict it with the Cloud Firewall above, not just
+BUILD_TOKEN.
 EOF

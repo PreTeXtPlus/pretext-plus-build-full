@@ -164,9 +164,14 @@ only once a single Droplet measurably falls behind.
 | Monitoring | Enable (free) | Watch CPU/mem/disk headroom as concurrent builds run |
 | SSH keys | Add yours at creation | Avoid password auth |
 
-Also create a **DigitalOcean Cloud Firewall** (or rely on `provision.sh`'s `ufw`
-setup below) allowing only 22 (SSH), 80, and 443 — nothing else needs to be
-reachable from the internet.
+Also create a **DigitalOcean Cloud Firewall** on the droplet: allow 22 (SSH)
+and 80 (needed for Let's Encrypt) from anywhere, but restrict **443 to an
+allowlist** of known IPs — this server is called machine-to-machine, not
+browsed to, so it doesn't need to be reachable by the whole internet. See
+[Restricting access](#restricting-access-this-server-isnt-meant-to-be-public)
+below. `provision.sh`'s `ufw` setup handles the host-level basics (SSH/80/443
+open, everything else closed); the Cloud Firewall is what actually enforces
+the 443 allowlist.
 
 ### Provisioning
 
@@ -196,20 +201,56 @@ public traffic must go through Caddy.
 `SITE_ADDRESS` (in `.env`) controls how Caddy serves:
 
 - **`:80`** (default) — plain HTTP, no certificates. Fine for local testing.
-- **a real domain**, e.g. `build.pretext.plus` — Caddy **automatically obtains
-  and renews a Let's Encrypt certificate**, serves HTTPS on 443, and redirects
-  80→443. No manual cert wrangling.
+- **a real domain**, e.g. `build-full.pretext.plus` — Caddy **automatically
+  obtains and renews a Let's Encrypt certificate**, serves HTTPS on 443, and
+  redirects 80→443. No manual cert wrangling.
 
 To go live with HTTPS:
 
-1. Point a DNS A record (e.g. `build.pretext.plus`) at the Droplet's IP.
-2. Set `SITE_ADDRESS=build.pretext.plus` in `.env`.
-3. Open ports 80 and 443 in the Droplet's firewall.
+1. Point a DNS A record (e.g. `build-full.pretext.plus`) at the Droplet's IP —
+   see [Restricting access](#restricting-access-this-server-isnt-meant-to-be-public)
+   for why this should be its own subdomain, not the lite server's hostname.
+2. Set `SITE_ADDRESS=build-full.pretext.plus` in `.env`.
+3. Open port 80 in the Droplet's firewall (for the ACME challenge) and restrict
+   443 per the allowlist below.
 4. `make up`. Caddy fetches the cert on first request; issued certs persist in
    the `caddy-data` volume across restarts.
 
 (A DO Load Balancer can do TLS instead, but Caddy keeps it self-contained in the
 compose stack with zero cert management.)
+
+### Restricting access (this server isn't meant to be public)
+
+Unlike [pretext-plus-build](../pretext-plus-build) (browsed to directly for
+previews), this server is only ever called machine-to-machine — by pretext.plus
+or the lite server's backend — so there's no reason to leave it open to the
+whole internet just because it has a domain name and a valid cert.
+
+1. **Use a dedicated subdomain**, e.g. `build-full.pretext.plus`, rather than
+   reusing `build.pretext.plus`. This lets you lock it down independently
+   without touching the lite server's DNS/firewall.
+2. **In Cloudflare, set that record's proxy to "DNS only"** (grey cloud, not
+   orange). Cloudflare's proxy is built for websites (caching, rewriting) and
+   adds nothing here — worse, it replaces the real client IP with Cloudflare's,
+   which breaks the IP allowlist in the next step.
+3. **Add a DigitalOcean Cloud Firewall** on the droplet that allows port 443
+   only from known IPs: your current testing IP, plus whatever IP the calling
+   server (pretext.plus / the lite server's backend) actually connects from.
+   Leave port 80 open to everyone — it only ever serves the Let's Encrypt
+   ACME challenge and an HTTP→HTTPS redirect, nothing sensitive.
+4. **Keep `BUILD_TOKEN`** as defense-in-depth on top of the allowlist, so an
+   unauthenticated request still can't submit a build even if the allowlist is
+   ever misconfigured.
+
+The tradeoff: when your testing IP changes, update the Cloud Firewall's
+allowlist (DO console, or `doctl compute firewall add-rule`/`remove-rule`) —
+a small, occasional edit in exchange for not exposing the build endpoint to
+the whole internet.
+
+(A fully closed alternative exists — Caddy's Cloudflare DNS-01 plugin can prove
+domain ownership via the Cloudflare API instead of a public HTTP challenge,
+letting you close port 80 too — but that needs a custom Caddy build and isn't
+necessary here: the IP allowlist plus `BUILD_TOKEN` already covers it.)
 
 ## Configuration
 

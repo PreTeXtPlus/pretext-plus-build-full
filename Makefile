@@ -16,7 +16,7 @@ logs:          ## Tail logs from all services
 	docker compose logs -f
 
 test:          ## Submit the sample project and poll until it finishes
-	./scripts/smoke_test.sh
+	bash ./scripts/smoke_test.sh
 
 pull-real:     ## Pre-pull the real PreTeXt image (~5GB) for real builds
 	docker pull pretextbook/pretext-full
