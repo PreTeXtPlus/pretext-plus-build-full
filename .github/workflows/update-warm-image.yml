@@ -1,0 +1,47 @@
+name: Update warm PreTeXt image
+
+# Manually triggered: pulls the latest pretextbook/pretext-full on the
+# droplet, rebuilds the "warm" image (scripts/update_warm_image.sh), and only
+# promotes it to the tag the live worker reads if a smoke build (HTML + PDF)
+# passes. The previously working image is kept as a one-command rollback.
+#
+# This SSHes into the droplet rather than building on the GitHub runner
+# because the warm image build and the smoke test both need the droplet's
+# Docker daemon (Docker-out-of-Docker) and its existing compose stack.
+on:
+  workflow_dispatch:
+    inputs:
+      repo_path:
+        description: >-
+          Path to this repo on the droplet, relative to the SSH user's home
+          directory.
+        required: false
+        default: pretext-plus-build-full
+
+jobs:
+  update-warm-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: SSH in, pull latest PreTeXt, rebuild + smoke-test + promote
+        env:
+          # Passed through as a real env var (not interpolated into the script
+          # text below) so a crafted repo_path input can't inject shell
+          # commands into the remote session.
+          REPO_PATH: ${{ inputs.repo_path }}
+        # Pinned to a commit SHA, not a mutable tag, since this action gets
+        # the droplet's SSH private key (secrets.DROPLET_SSH_KEY).
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        with:
+          host: ${{ secrets.DROPLET_SSH_HOST }}
+          username: ${{ secrets.DROPLET_SSH_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          port: ${{ secrets.DROPLET_SSH_PORT || 22 }}
+          command_timeout: 25m
+          envs: REPO_PATH
+          script: |
+            set -euo pipefail
+            cd "$HOME/$REPO_PATH"
+            # Pick up any changes to update_warm_image.sh itself before running it.
+            git pull --ff-only
+            ./scripts/update_warm_image.sh

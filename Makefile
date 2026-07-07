@@ -4,7 +4,7 @@
 HOST_DATA_DIR := $(CURDIR)/data
 export HOST_DATA_DIR
 
-.PHONY: up down logs test pull-real
+.PHONY: up down logs test pull-real warm-image update-warm-image
 
 up:            ## Build images and start the stack (detached)
 	docker compose up --build -d
@@ -23,3 +23,6 @@ pull-real:     ## Pre-pull the real PreTeXt image (~5GB) for real builds
 
 warm-image:    ## Build the "warm" image (bakes in PreTeXt's first-run setup)
 	docker build -t pretext-plus-build:warm ./build-image
+
+update-warm-image: ## Pull latest pretext-full, rebuild+smoke-test, promote on pass
+	./scripts/update_warm_image.sh

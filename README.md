@@ -81,9 +81,54 @@ make up                    # always use `make up`, not `docker compose up`,
 make test
 ```
 
-Builds now start warm and need no network (`BUILD_NETWORK=none`). To refresh the
-pinned runestone/npm assets later, re-run `make warm-image`. See
+Builds now start warm and need no network (`BUILD_NETWORK=none`). See
 [build-image/](build-image/) for the warmup project and Dockerfile.
+
+## Updating to a new PreTeXt release
+
+There's no version pin — `build-image/Dockerfile` builds `FROM
+pretextbook/pretext-full` (i.e. `:latest`), so "update PreTeXt" means re-pulling
+that upstream image and rebaking the warm image on top of it. Do this with:
+
+```bash
+make update-warm-image      # or: ./scripts/update_warm_image.sh
+```
+
+This pulls the latest `pretextbook/pretext-full`, builds a candidate warm
+image, and smoke-builds the sample project's `web` (HTML) and `print` (PDF)
+targets inside it using the same sandbox flags the worker uses for real jobs
+(`src/build.py`) — this is the toolchain most likely to break on a new
+release. Only if both succeed does it retag the candidate as
+`pretext-plus-build:warm` (what the live worker reads); the image that was
+live before the run is kept as `pretext-plus-build:warm-previous` for instant
+rollback:
+
+```bash
+docker tag pretext-plus-build:warm-previous pretext-plus-build:warm
+```
+
+No restart is needed either way — `BUILD_IMAGE` in `.env` is just a tag name,
+and Docker resolves it fresh on every `docker run`, so the next queued job
+picks up whichever image currently holds that tag.
+
+### Running it from GitHub Actions
+
+[`.github/workflows/update-warm-image.yml`](.github/workflows/update-warm-image.yml)
+runs the same script by SSHing into the droplet (manually triggered from the
+Actions tab — there's no scheduled/auto-detect trigger yet). It needs the
+Docker daemon and the deployed repo on the droplet, so it can't run on a
+GitHub-hosted runner. Configure these repo secrets:
+
+| Secret | Purpose |
+|---|---|
+| `DROPLET_SSH_HOST` | Droplet IP or hostname |
+| `DROPLET_SSH_USER` | SSH user (e.g. the one `provision.sh` was run as) |
+| `DROPLET_SSH_KEY` | Private key for that user, with **no** passphrase |
+| `DROPLET_SSH_PORT` | Optional, defaults to `22` |
+
+The workflow assumes the repo is cloned at `~/pretext-plus-build-full` on the
+droplet (the `workflow_dispatch` form lets you override this per-run) and that
+the SSH user can `git pull` and run `docker` there without `sudo`.
 
 ## API
 
