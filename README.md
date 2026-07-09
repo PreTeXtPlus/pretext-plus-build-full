@@ -309,6 +309,20 @@ untrusted. **In production, set `CALLBACK_ALLOWED_HOSTS` to the host(s) you
 actually call back** (e.g. `pretext.plus`) — this is the primary SSRF control:
 with it set, the worker will only POST to that host and nowhere else.
 
+### Debugging a callback that isn't arriving
+
+The `api` and `worker` services log every step of the callback lifecycle
+(`docker compose logs -f worker` / `make logs`): submit-time validation,
+each send attempt, and the final delivered/blocked/failed outcome. Set
+`LOG_LEVEL=DEBUG` to also log the JSON payload being sent. The same
+`callback_status`/`callback_error` fields are also visible via
+`GET /builds/{id}`.
+
+The most common cause when testing against a local receiver (e.g. Rails on
+`localhost`) is the SSRF guard: callback URLs resolving to a loopback/private
+address are rejected unless `CALLBACK_ALLOW_PRIVATE_IPS=true` is set. The logs
+will say so explicitly (`resolves to non-public address ... blocked`).
+
 As a backstop for the no-allowlist case, callback URLs that resolve to
 loopback/private/link-local/reserved IPs are rejected, redirects are disabled,
 and the URL is re-validated immediately before the POST. Note this backstop

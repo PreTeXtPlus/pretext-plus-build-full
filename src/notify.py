@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import socket
 from urllib.parse import urlparse
 
@@ -28,6 +29,8 @@ import requests
 
 from .config import settings
 from .jobs import store
+
+logger = logging.getLogger(__name__)
 
 
 def _resolves_to_blocked_ip(hostname: str) -> bool:
@@ -48,6 +51,11 @@ def _resolves_to_blocked_ip(hostname: str) -> bool:
             or ip.is_unspecified
             or ip.is_multicast
         ):
+            logger.warning(
+                "callback host %r resolves to non-public address %s -- blocked "
+                "(set CALLBACK_ALLOW_PRIVATE_IPS=true for local dev)",
+                hostname, ip,
+            )
             return True
     return False
 
@@ -59,11 +67,17 @@ def is_allowed_callback_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
     except ValueError:
+        logger.warning("callback_url %r could not be parsed", url)
         return False
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme not in ("http", "https") or not host:
+        logger.warning("callback_url %r has no http(s) scheme or hostname", url)
         return False
     if settings.callback_allowed_hosts and host not in settings.callback_allowed_hosts:
+        logger.warning(
+            "callback host %r is not in CALLBACK_ALLOWED_HOSTS=%s",
+            host, settings.callback_allowed_hosts,
+        )
         return False
     if not settings.callback_allow_private_ips and _resolves_to_blocked_ip(host):
         return False
@@ -100,25 +114,35 @@ def send_callback(job_id: str) -> None:
     """Best-effort, signed POST of the final job status to its callback_url."""
     data = store.get(job_id)
     if not data:
+        logger.warning("send_callback(%s): no job record found, skipping", job_id)
         return
     url = data.get("callback_url")
     if not url:
+        logger.debug("send_callback(%s): no callback_url set, skipping", job_id)
         return
 
     # Re-validate at send time: DNS may have rebound since submit, and the
     # allowlist/IP rules are the authoritative gate right before the request.
     if not is_allowed_callback_url(url):
+        logger.warning("send_callback(%s): callback_url %r blocked at send time", job_id, url)
         store.update(job_id, callback_status="blocked", callback_error="callback_url failed validation at send time")
         return
 
-    body = json.dumps(_build_payload(job_id, data)).encode()
+    payload = _build_payload(job_id, data)
+    logger.debug("send_callback(%s): payload=%s", job_id, payload)
+    body = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
     if settings.callback_secret:
         headers["X-PreTeXt-Signature"] = f"sha256={_sign(body)}"
 
+    retries = max(1, settings.callback_retries)
     last_error = None
-    for _ in range(max(1, settings.callback_retries)):
+    for attempt in range(1, retries + 1):
         try:
+            logger.info(
+                "send_callback(%s): POST %s (attempt %d/%d, status=%s)",
+                job_id, url, attempt, retries, data.get("status"),
+            )
             resp = requests.post(
                 url,
                 data=body,
@@ -127,8 +151,11 @@ def send_callback(job_id: str) -> None:
                 allow_redirects=False,
             )
             resp.raise_for_status()
+            logger.info("send_callback(%s): delivered, HTTP %d", job_id, resp.status_code)
             store.update(job_id, callback_status="delivered")
             return
         except requests.RequestException as e:
             last_error = e
+            logger.warning("send_callback(%s): attempt %d/%d failed: %s", job_id, attempt, retries, e)
+    logger.error("send_callback(%s): giving up after %d attempt(s): %s", job_id, retries, last_error)
     store.update(job_id, callback_status="failed", callback_error=str(last_error))

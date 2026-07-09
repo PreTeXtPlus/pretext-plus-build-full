@@ -25,4 +25,4 @@ warm-image:    ## Build the "warm" image (bakes in PreTeXt's first-run setup)
 	docker build -t pretext-plus-build:warm ./build-image
 
 update-warm-image: ## Pull latest pretext-full, rebuild+smoke-test, promote on pass
-	./scripts/update_warm_image.sh
+	bash ./scripts/update_warm_image.sh

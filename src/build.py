@@ -7,6 +7,7 @@ dropped capabilities, and hard resource/time limits — so even though it runs
 user-submitted source (which can execute code via Sage/LaTeX), it can't reach
 the host or the rest of the system.
 """
+import logging
 import os
 import shlex
 import time
@@ -19,6 +20,8 @@ from requests.exceptions import ReadTimeout, ConnectionError as ReqConnectionErr
 from .config import settings
 from .jobs import store
 from .notify import send_callback
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -39,9 +42,12 @@ def run_build(job_id: str, target: str) -> None:
     The callback lives in a `finally` so every terminal path — success, build
     failure, timeout, misconfig — notifies the initiating host exactly once,
     and a failing callback never propagates back into the build's status."""
+    logger.info("run_build(%s): starting, target=%s", job_id, target)
     try:
         _run_build(job_id, target)
     finally:
+        data = store.get(job_id) or {}
+        logger.info("run_build(%s): finished with status=%s, sending callback", job_id, data.get("status"))
         send_callback(job_id)
 
 

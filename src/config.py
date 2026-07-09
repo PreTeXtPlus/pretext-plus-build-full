@@ -4,7 +4,18 @@ The build backend (image + command) is intentionally swappable so the same
 code path can run a fast `alpine` "fake build" locally or the real
 `pretextbook/pretext-full` image in production. See .env.example.
 """
+import logging
 import os
+
+# Configured here (rather than in api.py/build.py) because config is the one
+# module every entrypoint imports first — this way both `uvicorn` (api) and
+# `rq worker` (worker) get a consistent stdout format before anything logs.
+# uvicorn later installs its own handler on the root logger for its own
+# messages, which is fine: our module loggers still propagate through it.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 
 class Settings:

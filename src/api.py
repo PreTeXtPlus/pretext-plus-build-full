@@ -5,6 +5,7 @@ returns a job id immediately and the client polls GET /builds/{id}. This is the
 deliberate sibling of the lightweight server, which returns rendered output
 inline because its snippet builds are sub-second.
 """
+import logging
 import os
 import shutil
 import tarfile
@@ -17,6 +18,8 @@ from fastapi.responses import FileResponse
 from .config import settings
 from .jobs import queue, store
 from .notify import is_allowed_callback_url
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="PreTeXt Plus — Full Build Server")
 
@@ -63,9 +66,11 @@ async def create_build(
     _check_token(token, authorization)
 
     if callback_url is not None and not is_allowed_callback_url(callback_url):
+        # is_allowed_callback_url already logged the specific reason.
         raise HTTPException(status_code=422, detail="Invalid or disallowed callback_url")
 
     job_id = uuid.uuid4().hex
+    logger.info("create_build: job=%s target=%s callback_url=%s", job_id, target, callback_url or "<none>")
     job_dir = os.path.join(settings.data_dir, "jobs", job_id)
     work_dir = os.path.join(job_dir, "work")
     os.makedirs(work_dir, exist_ok=True)
