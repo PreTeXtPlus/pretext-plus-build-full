@@ -136,7 +136,8 @@ the SSH user can `git pull` and run `docker` there without `sudo`.
 |--------|--------------------------|-------------------------------------------|
 | GET    | `/health`                | liveness                                  |
 | POST   | `/builds`                | submit a build → `{job_id, status_url}`   |
-| GET    | `/builds/{id}`           | status: `queued`/`running`/`success`/`failed` (+ logs) |
+| GET    | `/builds/{id}`           | status: `queued`/`running`/`success`/`failed` (+ `exit_code`, inline `log`, `log_url`) |
+| GET    | `/builds/{id}/log`       | full build log (combined stdout+stderr), `text/plain` |
 | GET    | `/builds/{id}/artifact`  | download `output.zip` (on success)        |
 
 `POST /builds` is `multipart/form-data`:
@@ -149,6 +150,24 @@ the SSH user can `git pull` and run `docker` there without `sudo`.
   (header `X-PreTeXt-Signature: sha256=<hex>`) so the receiver can verify it;
   the secret itself is never sent. URLs that resolve to internal/private
   addresses are rejected (SSRF guard). See `CALLBACK_*` in [Configuration](#configuration).
+
+  The callback body is:
+
+  ```json
+  {
+    "job_id": "…", "status": "success", "target": "web",
+    "exit_code": 0,
+    "log_tail": "…last CALLBACK_LOG_TAIL_CHARS chars of the build log…",
+    "log_truncated": true,
+    "log_url": "/builds/<id>/log",
+    "artifact_url": "/builds/<id>/artifact"
+  }
+  ```
+
+  It carries only the *tail* of the log (build errors land at the end); fetch the
+  full log from `log_url` when `log_truncated` is true. `artifact_url` is present
+  only on success. `log_url`/`artifact_url` are relative to this server — join
+  them with the host you called.
 
 Example:
 

@@ -13,7 +13,7 @@ import uuid
 import zipfile
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from .config import settings
 from .jobs import queue, store
@@ -99,9 +99,24 @@ def get_build(job_id: str):
     if data is None:
         raise HTTPException(status_code=404, detail="Unknown job")
     resp = {"job_id": job_id, **data}
+    if data.get("log") is not None:
+        resp["log_url"] = f"/builds/{job_id}/log"
     if data.get("status") == "success":
         resp["artifact_url"] = f"/builds/{job_id}/artifact"
     return resp
+
+
+@app.get("/builds/{job_id}/log")
+def get_log(job_id: str):
+    """The full, untruncated build log (combined stdout+stderr) as plain text.
+
+    The callback payload carries only a truncated tail; this is where the
+    receiver fetches the whole thing. Present as soon as the build reaches a
+    terminal state; empty while still queued/running."""
+    data = store.get(job_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    return PlainTextResponse(data.get("log") or "")
 
 
 @app.get("/builds/{job_id}/artifact")

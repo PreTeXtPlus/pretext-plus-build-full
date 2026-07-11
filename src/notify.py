@@ -87,20 +87,36 @@ def is_allowed_callback_url(url: str) -> bool:
 def _build_payload(job_id: str, data: dict) -> dict:
     """Construct the JSON body POSTed to the callback URL.
 
-    TODO(oscar): shape this to whatever pretext.plus wants to act on. `data` is
-    the full job hash from Redis (status, target, timestamps, log, and the
-    callback_url itself). Think about: which fields does the receiver actually
-    need, what should it NOT receive (the raw build log can be large — send it,
-    truncate it, or just a URL?), and how does it fetch the artifact on success?
+    The build log can be large, so it is not sent whole: the receiver gets the
+    exit code, the tail of the log (where build errors land), a `log_truncated`
+    flag, and `log_url` to fetch the full log on demand. `artifact_url` is added
+    on success so the receiver can pull the output. URLs are relative to this
+    server's base; the receiver joins them with the host it called.
     """
+    log = data.get("log") or ""
+    limit = settings.callback_log_tail_chars
+    truncated = limit > 0 and len(log) > limit
     payload = {
         "job_id": job_id,
         "status": data.get("status"),
         "target": data.get("target"),
+        "exit_code": _as_int(data.get("exit_code")),
+        "log_tail": log[-limit:] if truncated else log,
+        "log_truncated": truncated,
+        "log_url": f"/builds/{job_id}/log",
     }
     if data.get("status") == "success":
         payload["artifact_url"] = f"/builds/{job_id}/artifact"
     return payload
+
+
+def _as_int(value):
+    """Redis stores hash values as strings; the callback exposes exit_code as a
+    real integer (or null if the build never ran a process, e.g. a timeout)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _sign(body: bytes) -> str:

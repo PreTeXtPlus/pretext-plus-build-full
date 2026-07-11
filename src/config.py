@@ -56,6 +56,11 @@ class Settings:
     callback_timeout = int(os.getenv("CALLBACK_TIMEOUT", "10"))
     # How many times to attempt the callback POST (>=1).
     callback_retries = int(os.getenv("CALLBACK_RETRIES", "3"))
+    # The callback payload carries only the TAIL of the build log (errors are
+    # usually at the end); this caps how many characters of it are sent inline.
+    # The receiver fetches the full log from `log_url` when it needs more. 0
+    # disables the cap (send the whole log — not recommended).
+    callback_log_tail_chars = int(os.getenv("CALLBACK_LOG_TAIL_CHARS", "4000"))
     # Optional comma-separated allowlist of hostnames permitted as callback
     # targets. Empty = allow any *public* host (callback_url is only reachable
     # by token holders). Set this in production to pin it, e.g. "pretext.plus".

@@ -129,7 +129,7 @@ def _run_build(job_id: str, target: str) -> None:
                 pass
 
     if exit_code != 0:
-        store.update(job_id, status="failed", finished_at=_now(), log=logs)
+        store.update(job_id, status="failed", finished_at=_now(), log=logs, exit_code=exit_code)
         return
 
     output_dir = os.path.join(work_dir, settings.output_subdir)
@@ -138,9 +138,10 @@ def _run_build(job_id: str, target: str) -> None:
             job_id,
             status="failed",
             finished_at=_now(),
+            exit_code=exit_code,
             log=logs + f"\n\n[build succeeded but produced no '{settings.output_subdir}/' directory]",
         )
         return
 
     _zip_dir(output_dir, os.path.join(job_dir, "output.zip"))
-    store.update(job_id, status="success", finished_at=_now(), log=logs)
+    store.update(job_id, status="success", finished_at=_now(), log=logs, exit_code=exit_code)
