@@ -36,6 +36,32 @@ def _zip_dir(src_dir: str, zip_path: str) -> None:
                 z.write(full, os.path.relpath(full, src_dir))
 
 
+class _Cancelled(Exception):
+    """Raised internally when a cancel request is noticed mid-build."""
+
+
+def _wait_for_container(job_id: str, container) -> dict:
+    """Wait for the container to finish, polling in short increments instead
+    of one long blocking call so a cancel request or the overall build
+    timeout can be noticed promptly.
+
+    Re-raises the underlying ReadTimeout/ConnectionError once the *total*
+    elapsed wait reaches settings.build_timeout, matching the previous
+    single-call behavior; raises _Cancelled if a cancel request lands first.
+    """
+    elapsed = 0
+    poll = settings.build_poll_interval
+    while True:
+        try:
+            return container.wait(timeout=poll)
+        except (ReadTimeout, ReqConnectionError):
+            elapsed += poll
+            if elapsed >= settings.build_timeout:
+                raise
+            if (store.get(job_id) or {}).get("cancel_requested") == "1":
+                raise _Cancelled()
+
+
 def run_build(job_id: str, target: str) -> None:
     """Run the build, then fire the completion callback regardless of outcome.
 
@@ -60,6 +86,10 @@ def _run_build(job_id: str, target: str) -> None:
             log="Server misconfigured: HOST_DATA_DIR is unset, so build dirs "
             "cannot be mounted into build containers. See README.",
         )
+        return
+
+    if (store.get(job_id) or {}).get("cancel_requested") == "1":
+        store.update(job_id, status="cancelled", finished_at=_now(), log="Build cancelled before it started.")
         return
 
     store.update(job_id, status="running", started_at=_now())
@@ -99,8 +129,18 @@ def _run_build(job_id: str, target: str) -> None:
     try:
         container = client.containers.run(**run_kwargs)
         try:
-            result = container.wait(timeout=settings.build_timeout)
+            result = _wait_for_container(job_id, container)
             exit_code = int(result.get("StatusCode", 1))
+        except _Cancelled:
+            container.kill()
+            logs = container.logs().decode(errors="replace")
+            store.update(
+                job_id,
+                status="cancelled",
+                finished_at=_now(),
+                log=logs + "\n\n[build cancelled by request]",
+            )
+            return
         except (ReadTimeout, ReqConnectionError):
             container.kill()
             logs = container.logs().decode(errors="replace")
