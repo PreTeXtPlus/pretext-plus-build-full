@@ -9,11 +9,14 @@ import logging
 import os
 import shutil
 import tarfile
+import time
 import uuid
 import zipfile
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
+from rq.exceptions import InvalidJobOperation, NoSuchJobError
+from rq.job import Job
 
 from .config import settings
 from .jobs import queue, store
@@ -22,6 +25,12 @@ from .notify import is_allowed_callback_url
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="PreTeXt Plus — Full Build Server")
+
+TERMINAL_STATUSES = {"success", "failed", "cancelled"}
+
+
+def _now() -> str:
+    return f"{time.time():.0f}"
 
 
 def _check_token(form_token: str | None, authorization: str | None) -> None:
@@ -91,6 +100,41 @@ async def create_build(
     store.create(job_id, **fields)
     queue.enqueue("src.build.run_build", job_id, target, job_id=job_id)
     return {"job_id": job_id, "status": "queued", "status_url": f"/builds/{job_id}"}
+
+
+@app.post("/builds/{job_id}/cancel")
+def cancel_build(
+    job_id: str,
+    token: str | None = Form(None),
+    authorization: str | None = Header(None),
+):
+    _check_token(token, authorization)
+
+    data = store.get(job_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    if data.get("status") in TERMINAL_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Build already finished (status={data.get('status')})")
+
+    # Flag first: this is what a build that's already running (or about to
+    # start) checks to stop itself — see the poll loop and pre-run check in
+    # build.py. Set unconditionally so it's in place before the queued-job
+    # fast path below, which only saves the RQ dequeue if the job is still
+    # sitting in the queue.
+    store.update(job_id, cancel_requested="1")
+    logger.info("cancel_build(%s): cancel requested", job_id)
+
+    if data.get("status") == "queued":
+        try:
+            Job.fetch(job_id, connection=queue.connection).cancel()
+            store.update(job_id, status="cancelled", finished_at=_now())
+            return {"job_id": job_id, "status": "cancelled"}
+        except (NoSuchJobError, InvalidJobOperation):
+            # Already picked up by a worker (or already gone) between our status
+            # read and here; the cancel_requested flag above still covers it.
+            pass
+
+    return {"job_id": job_id, "status": "cancel_requested"}
 
 
 @app.get("/builds/{job_id}")

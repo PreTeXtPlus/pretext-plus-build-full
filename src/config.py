@@ -38,6 +38,10 @@ class Settings:
     build_cpus = float(os.getenv("BUILD_CPUS", "2"))
     build_pids_limit = int(os.getenv("BUILD_PIDS_LIMIT", "512"))
     build_timeout = int(os.getenv("BUILD_TIMEOUT", "600"))  # seconds
+    # How often (seconds) the worker checks for a cancel request while a build
+    # container is running. Lower = cancel takes effect sooner, at the cost of
+    # more frequent Redis reads during the build.
+    build_poll_interval = int(os.getenv("BUILD_POLL_INTERVAL", "2"))
     # User the build runs as. Empty = the image's default user. This MUST match
     # the user whose home holds the baked ~/.ptx in the warm image (root by
     # default), or PreTeXt re-does its first-run setup every build.

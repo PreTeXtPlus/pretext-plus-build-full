@@ -136,9 +136,19 @@ the SSH user can `git pull` and run `docker` there without `sudo`.
 |--------|--------------------------|-------------------------------------------|
 | GET    | `/health`                | liveness                                  |
 | POST   | `/builds`                | submit a build → `{job_id, status_url}`   |
-| GET    | `/builds/{id}`           | status: `queued`/`running`/`success`/`failed` (+ `exit_code`, inline `log`, `log_url`) |
+| GET    | `/builds/{id}`           | status: `queued`/`running`/`success`/`failed`/`cancelled` (+ `exit_code`, inline `log`, `log_url`) |
 | GET    | `/builds/{id}/log`       | full build log (combined stdout+stderr), `text/plain` |
 | GET    | `/builds/{id}/artifact`  | download `output.zip` (on success)        |
+| POST   | `/builds/{id}/cancel`    | cancel a queued or running build → `{job_id, status}` |
+
+`POST /builds/{id}/cancel` takes the same `token`/`Authorization` auth as the
+other endpoints. If the build hasn't started yet it's pulled off the queue
+immediately (`status: "cancelled"`); if it's already running, the worker
+notices within `BUILD_POLL_INTERVAL` seconds and kills the build container
+(`status: "cancel_requested"` in the response, settling to `"cancelled"`
+shortly after — poll `GET /builds/{id}` same as any other build). Returns
+`404` for an unknown job, `409` if the build already reached a terminal
+status.
 
 `POST /builds` is `multipart/form-data`:
 - `archive` — `.zip` or `.tar.gz` of the project root (the dir with `project.ptx`)
