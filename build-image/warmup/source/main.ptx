@@ -7,6 +7,15 @@
   </docinfo>
   <article xml:id="warmup">
     <title>Warmup</title>
+    <frontmatter xml:id="frontmatter">
+  <bibinfo>
+    <date>
+      Last Updated: <today />
+    </date>
+  </bibinfo>
+  <titlepage><titlepage-items/></titlepage>
+
+</frontmatter>
     <section xml:id="sec-warmup">
       <title>Warmup Section</title>
       <p>Inline math <m>x^2 + y^2 = z^2</m> forces MathJax/static asset setup.</p>
