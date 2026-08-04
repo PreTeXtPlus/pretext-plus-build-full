@@ -5,7 +5,7 @@
     <introduction>
       <p>
         Hello from the full build server. Here is some math:
-        <me>x^2 + y^2 = z^2</me>.
+        <md>x^2 + y^2 = z^2</md>.
       </p>
     </introduction>
     <section xml:id="sec-first">
