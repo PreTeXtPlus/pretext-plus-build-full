@@ -1,26 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
+
 <pretext>
   <docinfo>
     <latex-image-preamble>
       \usepackage{tikz, pgfplots}
     </latex-image-preamble>
   </docinfo>
+
   <article xml:id="warmup">
     <title>Warmup</title>
-    <frontmatter xml:id="frontmatter">
-  <bibinfo>
-    <date>
-      Last Updated: <today />
-    </date>
-  </bibinfo>
-  <titlepage><titlepage-items/></titlepage>
 
-</frontmatter>
+    <frontmatter xml:id="frontmatter">
+      <bibinfo>
+        <date>Last Updated: <today/></date>
+      </bibinfo>
+
+      <titlepage>
+        <titlepage-items/>
+      </titlepage>
+    </frontmatter>
+
     <section xml:id="sec-warmup">
       <title>Warmup Section</title>
-      <p>Inline math <m>x^2 + y^2 = z^2</m> forces MathJax/static asset setup.</p>
+
+      <p>
+        Inline math <m>x^2 + y^2 = z^2</m> forces MathJax/static asset setup.
+      </p>
+
       <figure>
-        <caption>A latex-image forces the asset-generation (npm) pipeline.</caption>
+        <caption>
+          A latex-image forces the asset-generation (npm) pipeline.
+        </caption>
+
         <image xml:id="fig-warmup">
           <latex-image>
             \begin{tikzpicture}
@@ -28,6 +39,28 @@
             \end{tikzpicture}
           </latex-image>
         </image>
+      </figure>
+      <!-- Interactive elements to set up puppeteer -->
+      <p>
+        Interactive elements to set up puppeteer.
+      </p>
+
+      <figure xmlns:pi="http://pretextbook.org/2020/pretext/internal">
+        <caption>Right Triangle Paradox</caption>
+        <interactive xml:id="geogebra-right-triangle" geogebra="KGn2d4Qd" width="70%" aspect="9:5" reset-icon="yes">
+          <description>
+            <p>
+              An interactive puzzle.
+              The puzzle shows two triangles placed on a square grid.
+              On the left, there is a triangle decomposed into four pieces.
+              On the right, there is a triangle with outlines corresponding to
+              the sizes and shapes of the pieces in the left triangle.
+              The pieces from the left triangle can be dragged to the right.
+              However, the triangle on the right has one additional grid square
+              containing a question mark.
+            </p>
+          </description>
+        </interactive>
       </figure>
     </section>
   </article>
