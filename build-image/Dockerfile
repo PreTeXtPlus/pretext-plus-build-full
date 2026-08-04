@@ -22,7 +22,7 @@ COPY warmup/ ./
 # Build both an HTML and a PDF target so every code path runs its first-time
 # setup: ~/.ptx population, the asset/npm pipeline (triggered by the
 # latex-image), runestone static fetching, and local mathjax build.
-RUN pretext build web && pretext build print && pretext build epub
+RUN pretext build web -v debug && pretext build print -v debug && pretext build epub -v debug
 
 # Leave a clean workdir; the worker mounts each job at /work.
 WORKDIR /work
