@@ -63,5 +63,48 @@
         </interactive>
       </figure>
     </section>
+
+    <section xml:id="sec-fitb">
+      <title>FITB</title>
+
+      <p>
+        Here is an example of a fill-in-the-blank (FITB) question to ensure we
+        have the node setup for that.
+      </p>
+
+      <exercise label="ex-demo-jscmp-primes" xmlns:pi="http://pretextbook.org/2020/pretext/internal">
+        <title>Fill-In, Javascript test of numbers</title>
+
+        <statement>
+          <p>
+            What is an example of a prime number less than 20?
+            <fillin width="5" answer="13"/>
+          </p>
+        </statement>
+        <evaluation>
+          <evaluate>
+            <test correct="yes">
+              <jscmp>
+                <!-- test if number is in a list -->
+                [2, 3, 5, 7, 11, 13, 17, 19].includes(Number(ans))
+              </jscmp>
+
+              <feedback>
+                <p>
+                  Any number from the list <m>\{2, 3, 5, 7, 11, 13, 17, 19\}</m>
+                  is a prime number less than 20.
+                </p>
+              </feedback>
+            </test>
+            <test>
+              <jscmp>
+                <!-- find why it fails to be in list -->
+                function(){ const val=Number(ans); if (val &lt;= 0) { return "You need to give a positive integer." } if (val &gt;= 20) { return "The integer must be less than 20." } for (let i=2; i&lt;=3; i++) { if (val % i == 0) { return `Your answer is composite; for example, it is divisible by ${i}.` } } return false; }()
+              </jscmp>
+            </test>
+          </evaluate>
+        </evaluation>
+      </exercise>
+    </section>
   </article>
 </pretext>
