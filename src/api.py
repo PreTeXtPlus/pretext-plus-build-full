@@ -145,7 +145,7 @@ def get_build(job_id: str):
     resp = {"job_id": job_id, **data}
     if data.get("log") is not None:
         resp["log_url"] = f"/builds/{job_id}/log"
-    if data.get("status") == "success":
+    if os.path.isfile(os.path.join(settings.data_dir, "jobs", job_id, "output.zip")):
         resp["artifact_url"] = f"/builds/{job_id}/artifact"
     return resp
 
@@ -168,9 +168,9 @@ def get_artifact(job_id: str):
     data = store.get(job_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Unknown job")
-    if data.get("status") != "success":
+    if data.get("status") not in TERMINAL_STATUSES:
         raise HTTPException(status_code=409, detail=f"Build not ready (status={data.get('status')})")
     zip_path = os.path.join(settings.data_dir, "jobs", job_id, "output.zip")
     if not os.path.isfile(zip_path):
-        raise HTTPException(status_code=404, detail="Artifact missing or expired")
+        raise HTTPException(status_code=404, detail="Artifact missing, expired, or build produced no output")
     return FileResponse(zip_path, media_type="application/zip", filename=f"{job_id}-output.zip")

@@ -22,6 +22,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import os
 import socket
 from urllib.parse import urlparse
 
@@ -90,8 +91,11 @@ def _build_payload(job_id: str, data: dict) -> dict:
     The build log can be large, so it is not sent whole: the receiver gets the
     exit code, the tail of the log (where build errors land), a `log_truncated`
     flag, and `log_url` to fetch the full log on demand. `artifact_url` is added
-    on success so the receiver can pull the output. URLs are relative to this
-    server's base; the receiver joins them with the host it called.
+    whenever an output.zip was produced -- not just on success, since a failed
+    build can still leave usable output -- so the receiver can pull it and
+    decide what to do given the accompanying status/exit_code. URLs are
+    relative to this server's base; the receiver joins them with the host it
+    called.
     """
     log = data.get("log") or ""
     limit = settings.callback_log_tail_chars
@@ -105,7 +109,7 @@ def _build_payload(job_id: str, data: dict) -> dict:
         "log_truncated": truncated,
         "log_url": f"/builds/{job_id}/log",
     }
-    if data.get("status") == "success":
+    if os.path.isfile(os.path.join(settings.data_dir, "jobs", job_id, "output.zip")):
         payload["artifact_url"] = f"/builds/{job_id}/artifact"
     return payload
 

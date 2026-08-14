@@ -168,12 +168,27 @@ def _run_build(job_id: str, target: str) -> None:
             except APIError:
                 pass
 
+    # Zip whatever output/ exists regardless of exit code: a nonzero exit
+    # doesn't always mean the build produced nothing usable (e.g. one target
+    # in a multi-target build failed, or the failure happened after the
+    # bulk of the output was written). Callers can tell success from a
+    # failure-with-output by status; the artifact is offered either way.
+    output_dir = os.path.join(work_dir, settings.output_subdir)
+    has_output = os.path.isdir(output_dir)
+    if has_output:
+        _zip_dir(output_dir, os.path.join(job_dir, "output.zip"))
+
     if exit_code != 0:
-        store.update(job_id, status="failed", finished_at=_now(), log=logs, exit_code=exit_code)
+        log = logs
+        if has_output:
+            log += (
+                f"\n\n[build exited with code {exit_code}, but produced output in "
+                f"'{settings.output_subdir}/' -- see artifact_url]"
+            )
+        store.update(job_id, status="failed", finished_at=_now(), log=log, exit_code=exit_code)
         return
 
-    output_dir = os.path.join(work_dir, settings.output_subdir)
-    if not os.path.isdir(output_dir):
+    if not has_output:
         store.update(
             job_id,
             status="failed",
@@ -183,5 +198,4 @@ def _run_build(job_id: str, target: str) -> None:
         )
         return
 
-    _zip_dir(output_dir, os.path.join(job_dir, "output.zip"))
     store.update(job_id, status="success", finished_at=_now(), log=logs, exit_code=exit_code)
