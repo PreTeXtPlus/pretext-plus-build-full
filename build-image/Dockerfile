@@ -24,5 +24,11 @@ COPY warmup/ ./
 # latex-image), runestone static fetching, and local mathjax build.
 RUN pretext build web -v debug && pretext build print -v debug && pretext build epub -v debug
 
+# Pre-download journal texstyle .cls/.sty files into ~/.ptx/latex-packages so
+# journal PDF builds work offline. BUILD_COMMAND copies them into each
+# project's generated-assets/latex-packages, where PreTeXt looks for them.
+COPY prefetch_latex_packages.py /opt/prefetch_latex_packages.py
+RUN python3 /opt/prefetch_latex_packages.py
+
 # Leave a clean workdir; the worker mounts each job at /work.
 WORKDIR /work

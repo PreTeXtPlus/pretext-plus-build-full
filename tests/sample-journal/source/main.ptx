@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pretext>
+  <article xml:id="sample-journal-article">
+    <title>Sample Journal Article</title>
+    <frontmatter>
+      <bibinfo>
+        <author>
+          <personname>A. Author</personname>
+        </author>
+        <!-- e-jc.sty requires both \dateline and \MSC, which the texstyle
+             only emits when a date and msc keywords are present. -->
+        <date>September 12, 2026</date>
+        <keywords authority="msc">
+          <keyword>05C99</keyword>
+        </keywords>
+      </bibinfo>
+      <titlepage>
+        <titlepage-items/>
+      </titlepage>
+      <abstract>
+        <p>A minimal article built in a journal style.</p>
+      </abstract>
+    </frontmatter>
+    <section xml:id="sec-first">
+      <title>A Section</title>
+      <p>If this builds offline, the pre-fetched journal packages were found: <m>x^2 + y^2 = z^2</m>.</p>
+    </section>
+  </article>
+</pretext>

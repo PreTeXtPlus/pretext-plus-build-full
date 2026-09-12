@@ -33,16 +33,22 @@ docker pull pretextbook/pretext-full
 echo "==> Building candidate warm image ($CANDIDATE_IMAGE) ..."
 docker build -t "$CANDIDATE_IMAGE" ./build-image
 
-tmp_work="$(mktemp -d)"
-trap 'rm -rf "$tmp_work"' EXIT
-cp -r "$ROOT_DIR/tests/sample/." "$tmp_work/"
-chmod -R 777 "$tmp_work"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+cp -r "$ROOT_DIR/tests/sample" "$tmp_root/sample"
+cp -r "$ROOT_DIR/tests/sample-journal" "$tmp_root/sample-journal"
+chmod -R 777 "$tmp_root"
+
+# Same prefix as the default BUILD_COMMAND (src/config.py): copy the image's
+# pre-fetched journal latex packages to where PreTeXt looks for them.
+# TODO: remove once PreTeXt checks ~/.ptx/latex-packages itself.
+SEED_LATEX_PACKAGES='if [ -d ~/.ptx/latex-packages ]; then mkdir -p generated-assets/latex-packages && cp -r ~/.ptx/latex-packages/. generated-assets/latex-packages/; fi'
 
 smoke_test_target() {
-  local target="$1"
-  echo "==> Smoke-testing candidate image: target=$target ..."
+  local project="$1" target="$2"
+  echo "==> Smoke-testing candidate image: project=$project target=$target ..."
   timeout "$TIMEOUT" docker run --rm \
-    -v "$tmp_work:/work" \
+    -v "$tmp_root/$project:/work" \
     -w /work \
     --network none \
     --memory "$MEM_LIMIT" \
@@ -50,14 +56,18 @@ smoke_test_target() {
     --cap-drop ALL \
     --security-opt no-new-privileges \
     "$CANDIDATE_IMAGE" \
-    sh -c "pretext build $target"
+    sh -c "$SEED_LATEX_PACKAGES; pretext build $target"
 }
 
 # tests/sample/project.ptx defines "web" (html) and "print" (pdf) targets --
 # the same two the warmup Dockerfile itself builds, so this exercises both
 # the HTML and LaTeX/PDF toolchains, which is where PreTeXt releases are most
-# likely to introduce a regression.
-if smoke_test_target web && smoke_test_target print; then
+# likely to introduce a regression. tests/sample-journal builds a PDF in the
+# electron-j-combin style, whose texstyle needs a downloaded e-jc.sty -- with
+# --network none this only passes if the pre-fetched latex packages are found.
+if smoke_test_target sample web \
+  && smoke_test_target sample print \
+  && smoke_test_target sample-journal print; then
   echo "==> Smoke test passed."
 else
   echo "==> Smoke test FAILED. Leaving '$WARM_IMAGE' untouched."
