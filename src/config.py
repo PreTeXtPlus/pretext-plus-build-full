@@ -30,7 +30,18 @@ class Settings:
     # --- Build backend (swappable) ---
     build_image = os.getenv("BUILD_IMAGE", "pretextbook/pretext-full")
     # `{target}` is substituted with the (shell-quoted) requested target name.
-    build_command = os.getenv("BUILD_COMMAND", "pretext build {target}")
+    # The prefix copies the warm image's pre-fetched journal .cls/.sty files
+    # (~/.ptx/latex-packages) into the project's generated-assets, which is
+    # where PreTeXt currently looks before trying to download them (and builds
+    # have no network). It assumes the publication file's generated dir is
+    # generated-assets/, and is a no-op on images without the cache.
+    # TODO: remove the prefix once PreTeXt checks ~/.ptx/latex-packages itself.
+    build_command = os.getenv(
+        "BUILD_COMMAND",
+        "if [ -d ~/.ptx/latex-packages ]; then mkdir -p generated-assets/latex-packages"
+        " && cp -r ~/.ptx/latex-packages/. generated-assets/latex-packages/; fi;"
+        " pretext build {target}",
+    )
 
     # --- Sandbox limits applied to every build container ---
     build_network = os.getenv("BUILD_NETWORK", "none")

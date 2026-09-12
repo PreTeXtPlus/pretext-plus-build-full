@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A journal-style sample whose texstyle requires a downloaded .sty file
+     (e-jc.sty). Smoke-tested offline to prove the warm image's pre-fetched
+     latex packages are found. -->
+<project ptx-version="2">
+  <targets>
+    <target name="print" format="pdf"/>
+  </targets>
+</project>

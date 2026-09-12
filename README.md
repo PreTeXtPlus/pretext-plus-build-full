@@ -84,6 +84,15 @@ make test
 Builds now start warm and need no network (`BUILD_NETWORK=none`). See
 [build-image/](build-image/) for the warmup project and Dockerfile.
 
+**Journal styles.** Some journal texstyles (AMS, E-JC, Springer, …) need
+`.cls`/`.sty` files that PreTeXt downloads during the build. The warm image
+pre-fetches them into `~/.ptx/latex-packages`
+([build-image/prefetch_latex_packages.py](build-image/prefetch_latex_packages.py));
+a failed download only warns, so check the image build log. The default
+`BUILD_COMMAND` then copies them into the project's
+`generated-assets/latex-packages`, which is where PreTeXt currently looks. That
+copy step can be dropped once PreTeXt checks `~/.ptx/latex-packages` itself.
+
 ## Updating to a new PreTeXt release
 
 There's no version pin — `build-image/Dockerfile` builds `FROM
@@ -96,7 +105,7 @@ make update-warm-image      # or: ./scripts/update_warm_image.sh
 
 This pulls the latest `pretextbook/pretext-full`, builds a candidate warm
 image, and smoke-builds the sample project's `web` (HTML) and `print` (PDF)
-targets inside it using the same sandbox flags the worker uses for real jobs
+targets, plus a journal-style PDF (`tests/sample-journal`), inside it using the same sandbox flags the worker uses for real jobs
 (`src/build.py`) — this is the toolchain most likely to break on a new
 release. Only if both succeed does it retag the candidate as
 `pretext-plus-build:warm` (what the live worker reads); the image that was
