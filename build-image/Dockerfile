@@ -16,6 +16,16 @@ FROM pretextbook/pretext-full
 USER root
 ENV HOME=/root
 
+# Optionally pin the PreTeXt CLI to a specific release (e.g. 2.54.0) on top of
+# whatever the upstream image ships. The upstream image is rebuilt after each
+# CLI release, but on a delay, so this lets a rebuild triggered by that release
+# use it straight away. Empty = keep the image's own CLI.
+ARG PRETEXT_VERSION=
+RUN if [ -n "$PRETEXT_VERSION" ]; then \
+      pip install --no-cache-dir --prefer-binary "pretext[all]==$PRETEXT_VERSION"; \
+    fi \
+ && pretext --version
+
 WORKDIR /opt/warmup
 COPY warmup/ ./
 

@@ -114,8 +114,16 @@ picks up whichever image currently holds that tag.
 ### Running it from GitHub Actions
 
 [`.github/workflows/update-warm-image.yml`](.github/workflows/update-warm-image.yml)
-runs the same script by SSHing into the droplet (manually triggered from the
-Actions tab — there's no scheduled/auto-detect trigger yet). It needs the
+runs the same script by SSHing into the droplet. It runs automatically after
+each stable PreTeXt CLI release (pretext-cli's `deploy-stable` workflow sends a
+`pretext-cli-release` repository dispatch carrying the version), and can be run
+by hand from the Actions tab. An automatic run waits up to two hours for the
+upstream `pretext-full` image to be rebuilt, then pins the CLI in the warm image
+to the released version (`PRETEXT_VERSION`, also accepted by
+`update_warm_image.sh` and as a `workflow_dispatch` input) so the build server
+uses it even if the upstream image lags. The dispatch needs a token on the
+pretext-cli side (`PRETEXT_PLUS_DISPATCH_TOKEN`) that can dispatch to this repo.
+It needs the
 Docker daemon and the deployed repo on the droplet, so it can't run on a
 GitHub-hosted runner. Configure these repo secrets:
 
