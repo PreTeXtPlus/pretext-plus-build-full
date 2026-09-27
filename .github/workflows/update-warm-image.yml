@@ -1,6 +1,8 @@
 name: Update warm PreTeXt image
 
-# Manually triggered: pulls the latest pretextbook/pretext-full on the
+# Triggered manually, or by pretext-cli's deploy-stable workflow after each
+# stable CLI release (repository_dispatch "pretext-cli-release", payload
+# {version, released_at}). Pulls the latest pretextbook/pretext-full on the
 # droplet, rebuilds the "warm" image (scripts/update_warm_image.sh), and only
 # promotes it to the tag the live worker reads if a smoke build (HTML + PDF)
 # passes. The previously working image is kept as a one-command rollback.
@@ -9,8 +11,16 @@ name: Update warm PreTeXt image
 # because the warm image build and the smoke test both need the droplet's
 # Docker daemon (Docker-out-of-Docker) and its existing compose stack.
 on:
+  repository_dispatch:
+    types: [pretext-cli-release]
   workflow_dispatch:
     inputs:
+      pretext_version:
+        description: >-
+          PreTeXt CLI version to pin in the warm image (e.g. 2.54.0). Blank
+          uses whatever pretext-full ships.
+        required: false
+        default: ""
       repo_path:
         description: >-
           Path to this repo on the droplet, relative to the SSH user's home
@@ -18,17 +28,55 @@ on:
         required: false
         default: pretext-plus-build-full
 
+concurrency:
+  group: update-warm-image
+  cancel-in-progress: false
+
 jobs:
   update-warm-image:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 150
     steps:
+      - name: Resolve PreTeXt CLI version
+        id: cli
+        env:
+          VERSION: ${{ github.event.client_payload.version || inputs.pretext_version }}
+        run: |
+          VERSION="${VERSION#v}"
+          if [ -n "$VERSION" ] && ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Not a PreTeXt CLI version: '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # The CLI release also triggers a rebuild of pretextbook/pretext-full
+      # (PreTeXtBook/pretext-docker), which runs behind a deployment delay.
+      # Give it a chance to land so the rest of the toolchain is current too;
+      # the CLI itself is pinned either way, so this is best effort.
+      - name: Wait for the pretext-full rebuild
+        if: github.event_name == 'repository_dispatch' && github.event.client_payload.released_at
+        env:
+          RELEASED_AT: ${{ github.event.client_payload.released_at }}
+        run: |
+          url="https://hub.docker.com/v2/repositories/pretextbook/pretext-full/tags/latest"
+          for attempt in $(seq 1 24); do
+            updated=$(curl -fsS "$url" | jq -r .last_updated || true)
+            if [ -n "$updated" ] && [ "$(date -d "$updated" +%s)" -ge "$(date -d "$RELEASED_AT" +%s)" ]; then
+              echo "pretext-full:latest was rebuilt at $updated"
+              exit 0
+            fi
+            echo "Attempt $attempt: pretext-full:latest last updated ${updated:-?}, before $RELEASED_AT; retrying in 5 minutes"
+            sleep 300
+          done
+          echo "::warning::pretext-full was not rebuilt within 2 hours of the CLI release; continuing with the current image and the pinned CLI"
+
       - name: SSH in, pull latest PreTeXt, rebuild + smoke-test + promote
         env:
           # Passed through as a real env var (not interpolated into the script
           # text below) so a crafted repo_path input can't inject shell
           # commands into the remote session.
-          REPO_PATH: ${{ inputs.repo_path }}
+          REPO_PATH: ${{ inputs.repo_path || 'pretext-plus-build-full' }}
+          PRETEXT_VERSION: ${{ steps.cli.outputs.version }}
         # Pinned to a commit SHA, not a mutable tag, since this action gets
         # the droplet's SSH private key (secrets.DROPLET_SSH_KEY).
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
@@ -38,7 +86,7 @@ jobs:
           key: ${{ secrets.DROPLET_SSH_KEY }}
           port: ${{ secrets.DROPLET_SSH_PORT || 22 }}
           command_timeout: 25m
-          envs: REPO_PATH
+          envs: REPO_PATH,PRETEXT_VERSION
           script: |
             set -euo pipefail
             cd "$HOME/$REPO_PATH"

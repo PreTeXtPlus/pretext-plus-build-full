@@ -12,6 +12,9 @@
 #
 # Safe to re-run: on a failed smoke test, :warm (and :warm-previous) are left
 # untouched and the script exits non-zero.
+#
+# Set PRETEXT_VERSION (e.g. PRETEXT_VERSION=2.54.0) to pin the PreTeXt CLI in
+# the warm image to that release; otherwise it uses whatever pretext-full ships.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,8 +33,17 @@ TIMEOUT="${BUILD_TIMEOUT:-600}"
 echo "==> Pulling latest pretextbook/pretext-full ..."
 docker pull pretextbook/pretext-full
 
-echo "==> Building candidate warm image ($CANDIDATE_IMAGE) ..."
-docker build -t "$CANDIDATE_IMAGE" ./build-image
+PRETEXT_VERSION="${PRETEXT_VERSION:-}"
+echo "==> Building candidate warm image ($CANDIDATE_IMAGE)${PRETEXT_VERSION:+ with PreTeXt CLI $PRETEXT_VERSION} ..."
+docker build --build-arg "PRETEXT_VERSION=$PRETEXT_VERSION" -t "$CANDIDATE_IMAGE" ./build-image
+
+if [ -n "$PRETEXT_VERSION" ]; then
+  actual_version="$(docker run --rm --network none "$CANDIDATE_IMAGE" sh -c "pretext --version" | tail -n 1)"
+  if [ "$actual_version" != "$PRETEXT_VERSION" ]; then
+    echo "==> Candidate has PreTeXt CLI '$actual_version', expected '$PRETEXT_VERSION'. Leaving '$WARM_IMAGE' untouched."
+    exit 1
+  fi
+fi
 
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
