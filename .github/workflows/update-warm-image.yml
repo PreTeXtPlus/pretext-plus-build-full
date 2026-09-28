@@ -79,7 +79,7 @@ jobs:
           PRETEXT_VERSION: ${{ steps.cli.outputs.version }}
         # Pinned to a commit SHA, not a mutable tag, since this action gets
         # the droplet's SSH private key (secrets.DROPLET_SSH_KEY).
-        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.DROPLET_SSH_HOST }}
           username: ${{ secrets.DROPLET_SSH_USER }}
