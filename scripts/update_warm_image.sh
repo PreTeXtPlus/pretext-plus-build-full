@@ -9,6 +9,7 @@
 # The image that was live before this run is kept as :warm-previous, so a bad
 # PreTeXt release can be rolled back with one command:
 #   docker tag pretext-plus-build:warm-previous pretext-plus-build:warm
+# Older images than that are pruned after a successful promotion.
 #
 # Safe to re-run: on a failed smoke test, :warm (and :warm-previous) are left
 # untouched and the script exits non-zero.
@@ -95,6 +96,13 @@ fi
 echo "==> Promoting candidate to $WARM_IMAGE ..."
 docker tag "$CANDIDATE_IMAGE" "$WARM_IMAGE"
 docker rmi "$CANDIDATE_IMAGE" >/dev/null 2>&1 || true
+
+# Each run leaves the old :warm-previous (and the pretext-full it was built
+# from) untagged, several GB apiece. Dangling-only, so :warm, :warm-previous,
+# and the current pretext-full are kept; the build cache is left alone to keep
+# the next rebuild fast (`make prune-images` clears it too).
+echo "==> Removing untagged images left over from earlier runs ..."
+docker image prune -f
 
 echo "==> Done. New jobs will use the updated $WARM_IMAGE."
 echo "    Roll back if needed: docker tag $PREVIOUS_IMAGE $WARM_IMAGE"

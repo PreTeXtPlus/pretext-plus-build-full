@@ -10,6 +10,7 @@ the host or the rest of the system.
 import logging
 import os
 import shlex
+import shutil
 import time
 import zipfile
 
@@ -34,6 +35,27 @@ def _zip_dir(src_dir: str, zip_path: str) -> None:
             for name in files:
                 full = os.path.join(root, name)
                 z.write(full, os.path.relpath(full, src_dir))
+
+
+def _prune_expired_jobs(current_job_id: str) -> None:
+    """Delete job dirs whose Redis record has expired.
+
+    The record's TTL is set once, at submission (Store.create), and the job dir
+    is created at the same moment, so a dir untouched for longer than job_ttl
+    belongs to a job the API already 404s on. Runs in the worker because build
+    containers run as root and leave root-owned files the host user can't
+    remove. Best effort: a failure here never affects a build."""
+    cutoff = time.time() - settings.job_ttl
+    try:
+        with os.scandir(os.path.join(settings.data_dir, "jobs")) as entries:
+            for entry in entries:
+                if entry.name == current_job_id or not entry.is_dir(follow_symlinks=False):
+                    continue
+                if entry.stat(follow_symlinks=False).st_mtime < cutoff:
+                    shutil.rmtree(entry.path, ignore_errors=True)
+                    logger.info("pruned expired job dir %s", entry.name)
+    except OSError as e:
+        logger.warning("pruning expired job dirs failed: %s", e)
 
 
 class _Cancelled(Exception):
@@ -75,6 +97,8 @@ def run_build(job_id: str, target: str) -> None:
         data = store.get(job_id) or {}
         logger.info("run_build(%s): finished with status=%s, sending callback", job_id, data.get("status"))
         send_callback(job_id)
+        # After the callback, so a large deletion never delays the caller.
+        _prune_expired_jobs(job_id)
 
 
 def _run_build(job_id: str, target: str) -> None:

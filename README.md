@@ -116,6 +116,11 @@ rollback:
 docker tag pretext-plus-build:warm-previous pretext-plus-build:warm
 ```
 
+Only that one rollback step is kept: after a successful promotion the script
+runs `docker image prune -f`, which removes the images that are no longer
+tagged (the older `:warm-previous`, superseded `pretext-full` pulls), each
+several GB.
+
 No restart is needed either way — `BUILD_IMAGE` in `.env` is just a tag name,
 and Docker resolves it fresh on every `docker run`, so the next queued job
 picks up whichever image currently holds that tag.
@@ -146,6 +151,22 @@ GitHub-hosted runner. Configure these repo secrets:
 The workflow assumes the repo is cloned at `~/pretext-plus-build-full` on the
 droplet (the `workflow_dispatch` form lets you override this per-run) and that
 the SSH user can `git pull` and run `docker` there without `sudo`.
+
+## Disk space
+
+Each job keeps its project, build output, and `output.zip` under `data/jobs/`
+until its record expires (`JOB_TTL`, default 24h); after every build the
+worker deletes job dirs older than that. Warm-image updates prune the images
+they replace (see above). To check or reclaim space by hand:
+
+```bash
+make disk-usage     # df, `docker system df`, size of data/jobs
+make clean          # prune-images (untagged images, stopped containers,
+                    # build cache) + prune-jobs (expired job dirs)
+```
+
+Neither touches `:warm`, `:warm-previous`, or the Docker volumes (Redis data,
+Caddy's TLS certs).
 
 ## API
 
