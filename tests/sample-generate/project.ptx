@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A project with one of each generated-asset type the /generate endpoint
+     is meant to serve (latex-image, asymptote, sageplot). Used by
+     scripts/smoke_test_generate.sh and by update_warm_image.sh to prove a
+     new warm image can still generate assets offline. -->
+<project ptx-version="2">
+  <targets>
+    <target name="web" format="html" />
+    <target name="print" format="pdf" />
+  </targets>
+</project>

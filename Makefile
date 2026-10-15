@@ -11,7 +11,7 @@ export HOST_DATA_DIR
 # no builds have run lately or JOB_TTL was lowered.
 JOB_MAX_AGE_MIN ?= 1500
 
-.PHONY: up down logs test pull-real warm-image update-warm-image disk-usage prune-images prune-jobs clean
+.PHONY: up down logs test test-generate pull-real warm-image update-warm-image disk-usage prune-images prune-jobs clean
 
 up:            ## Build images and start the stack (detached)
 	docker compose up --build -d
@@ -24,6 +24,9 @@ logs:          ## Tail logs from all services
 
 test:          ## Submit the sample project and poll until it finishes
 	bash ./scripts/smoke_test.sh
+
+test-generate: ## Submit tests/sample-generate to /generate and poll until it finishes
+	bash ./scripts/smoke_test_generate.sh
 
 pull-real:     ## Pre-pull the real PreTeXt image (~5GB) for real builds
 	docker pull pretextbook/pretext-full

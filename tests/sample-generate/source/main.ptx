@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pretext>
+  <docinfo>
+    <macros>\newcommand{\R}{\mathbb{R}}</macros>
+    <latex-image-preamble>\usepackage{tikz}</latex-image-preamble>
+  </docinfo>
+  <article xml:id="generate-sample">
+    <title>Generated Asset Sample</title>
+    <section xml:id="sec-assets">
+      <title>One of each</title>
+      <figure xml:id="fig-tri">
+        <caption>A latex-image (TikZ) using a docinfo macro</caption>
+        <image xml:id="img-tri" width="50%">
+          <latex-image>
+            \begin{tikzpicture}
+              \draw[thick] (0,0) -- (2,1) -- (1,2) -- cycle;
+              \node at (1,1) {$\R$};
+            \end{tikzpicture}
+          </latex-image>
+        </image>
+      </figure>
+      <figure xml:id="fig-asy">
+        <caption>An Asymptote diagram</caption>
+        <image xml:id="img-asy" width="50%">
+          <asymptote>
+            size(3cm);
+            draw(unitcircle);
+          </asymptote>
+        </image>
+      </figure>
+      <figure xml:id="fig-sage">
+        <caption>A Sage plot</caption>
+        <image xml:id="img-sage" width="50%">
+          <sageplot>plot(sin(x), (x, -pi, pi))</sageplot>
+        </image>
+      </figure>
+    </section>
+  </article>
+</pretext>

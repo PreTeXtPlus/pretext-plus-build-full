@@ -57,6 +57,24 @@ services:
     depends_on:
       - redis
 
+  # Same image, socket, and data mount as `worker`, but it drains the
+  # "generate" queue (asset previews, seconds each) so a generate job never
+  # waits behind a multi-minute build -- an RQ worker runs one job at a time.
+  # Scale independently of builds: docker compose up -d --scale generate-worker=N
+  generate-worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      HOST_DATA_DIR: ${HOST_DATA_DIR}
+    command: ["rq", "worker", "-u", "redis://redis:6379/0", "generate"]
+    volumes:
+      - ./data:/data
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+    depends_on:
+      - redis
+
 volumes:
   redis-data:
   caddy-data:

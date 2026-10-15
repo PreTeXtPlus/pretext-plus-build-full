@@ -64,6 +64,24 @@ class Settings:
     # artifact after a successful build.
     output_subdir = os.getenv("OUTPUT_SUBDIR", "output")
 
+    # --- Asset generation (`pretext generate`, served at /generate) ---
+    # Same image and sandbox as builds, but its own queue, worker, and
+    # tighter limits: a generate job renders a handful of assets in seconds
+    # and must never wait behind a multi-minute build (an RQ worker runs one
+    # job at a time). `{target}` is the shell-quoted target name; `{assets}`
+    # the shell-quoted, space-separated asset types requested ("" = all).
+    generate_command = os.getenv("GENERATE_COMMAND", "pretext generate {assets} -t {target}")
+    generate_mem_limit = os.getenv("GENERATE_MEM_LIMIT", "1g")
+    generate_cpus = float(os.getenv("GENERATE_CPUS", "1"))
+    generate_pids_limit = int(os.getenv("GENERATE_PIDS_LIMIT", "256"))
+    generate_timeout = int(os.getenv("GENERATE_TIMEOUT", "120"))  # seconds
+    # Directory (relative to the project root) zipped as a generate job's
+    # artifact: the CLI's generated-asset cache (project.ptx
+    # @generated-cache, default .cache). Its files are named by a hash of
+    # each asset's extracted source -- the key a later `pretext build` uses
+    # to skip regenerating that asset when the same file is placed back here.
+    generate_output_subdir = os.getenv("GENERATE_OUTPUT_SUBDIR", ".cache")
+
     # --- Completion callback (optional webhook) ---
     # If a /builds request includes a callback_url, the worker POSTs the final
     # job status there once the build reaches a terminal state (success/failed).

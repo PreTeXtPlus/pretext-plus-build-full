@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 import requests
 
 from .config import settings
-from .jobs import store
+from .jobs import JOB_PREFIXES, store
 
 logger = logging.getLogger(__name__)
 
@@ -95,22 +95,32 @@ def _build_payload(job_id: str, data: dict) -> dict:
     build can still leave usable output -- so the receiver can pull it and
     decide what to do given the accompanying status/exit_code. URLs are
     relative to this server's base; the receiver joins them with the host it
-    called.
+    called. `kind` says whether this was a build or a generate job; generate
+    payloads also carry `assets` and `files`.
     """
     log = data.get("log") or ""
     limit = settings.callback_log_tail_chars
     truncated = limit > 0 and len(log) > limit
+    # Records written before generate jobs existed carry no kind: builds.
+    kind = data.get("kind", "build")
+    prefix = JOB_PREFIXES[kind]
     payload = {
         "job_id": job_id,
+        "kind": kind,
         "status": data.get("status"),
         "target": data.get("target"),
         "exit_code": _as_int(data.get("exit_code")),
         "log_tail": log[-limit:] if truncated else log,
         "log_truncated": truncated,
-        "log_url": f"/builds/{job_id}/log",
+        "log_url": f"{prefix}/{job_id}/log",
     }
+    if kind == "generate":
+        payload["assets"] = (data.get("assets") or "").split()
+        # The artifact's file list (cache-key-named), so the receiver can
+        # record each asset's key without unzipping first.
+        payload["files"] = json.loads(data["files"]) if data.get("files") else []
     if os.path.isfile(os.path.join(settings.data_dir, "jobs", job_id, "output.zip")):
-        payload["artifact_url"] = f"/builds/{job_id}/artifact"
+        payload["artifact_url"] = f"{prefix}/{job_id}/artifact"
     return payload
 
 

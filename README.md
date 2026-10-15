@@ -11,11 +11,13 @@ is **asynchronous**: submit a job, poll for status, download the artifact.
 ## Architecture
 
 ```
-pretext.plus ──HTTP──> API (FastAPI) ──> Redis (queue + status)
+pretext.plus ──HTTP──> API (FastAPI) ──> Redis (queues + status)
                           │                  │
-                          │             Worker (RQ)
-                          │                  │ docker run --rm (sandboxed)
-                          │             pretext-full container (ephemeral)
+                          │        ┌─────────┴──────────┐
+                          │   Worker (RQ)       Generate worker (RQ)
+                          │   queue "builds"    queue "generate"
+                          │        │ docker run --rm (sandboxed)
+                          │   pretext-full container (ephemeral)
                           └── GET status / artifact
 ```
 
@@ -24,7 +26,11 @@ pretext.plus ──HTTP──> API (FastAPI) ──> Redis (queue + status)
 - **Worker** — the only component with the Docker socket. For each job it spawns
   a fresh, locked-down `pretext-full` container (no network, dropped caps,
   CPU/memory/pid/time limits, non-root) to run the build, then zips the output.
-- **Redis** — work queue (RQ) and per-job status.
+- **Generate worker** — the same image and code, draining a separate queue of
+  `pretext generate` jobs (asset previews, seconds each) with smaller limits.
+  An RQ worker runs one job at a time, so without it a preview would wait
+  behind a running multi-minute build. See [Asset generation](#asset-generation-generate).
+- **Redis** — work queues (RQ) and per-job status.
 
 Why a fresh container per build: isolation between users, clean reproducible
 state, and the ability to use the official image unmodified.
@@ -37,8 +43,9 @@ with no multi-GB download.
 
 ```bash
 cp .env.example .env      # fake-build mode is the default
-make up                   # start api + worker + redis
+make up                   # start api + worker + generate-worker + redis
 make test                 # zip the sample project, submit, poll, fetch artifact
+make test-generate        # same for the asset-generation endpoint
 make logs                 # watch what's happening
 make down
 ```
@@ -105,9 +112,11 @@ make update-warm-image      # or: ./scripts/update_warm_image.sh
 
 This pulls the latest `pretextbook/pretext-full`, builds a candidate warm
 image, and smoke-builds the sample project's `web` (HTML) and `print` (PDF)
-targets, plus a journal-style PDF (`tests/sample-journal`), inside it using the same sandbox flags the worker uses for real jobs
-(`src/build.py`) — this is the toolchain most likely to break on a new
-release. Only if both succeed does it retag the candidate as
+targets, plus a journal-style PDF (`tests/sample-journal`) and a `pretext
+generate` of one latex-image, asymptote and sageplot each
+(`tests/sample-generate`, under the `/generate` limits), inside it using the
+same sandbox flags the worker uses for real jobs (`src/build.py`) — this is
+the toolchain most likely to break on a new release. Only if both succeed does it retag the candidate as
 `pretext-plus-build:warm` (what the live worker reads); the image that was
 live before the run is kept as `pretext-plus-build:warm-previous` for instant
 rollback:
@@ -178,6 +187,12 @@ Caddy's TLS certs).
 | GET    | `/builds/{id}/log`       | full build log (combined stdout+stderr), `text/plain` |
 | GET    | `/builds/{id}/artifact`  | download `output.zip` (on success)        |
 | POST   | `/builds/{id}/cancel`    | cancel a queued or running build → `{job_id, status}` |
+| POST   | `/generate`              | submit an asset-generation job → `{job_id, status_url}` |
+| GET    | `/generate/{id}`         | status, same shape as a build plus `assets` and `files` |
+| GET    | `/generate/{id}/log`     | full `pretext generate` log, `text/plain` |
+| GET    | `/generate/{id}/artifact` | download the asset cache as `output.zip` |
+| GET    | `/generate/{id}/files/{path}` | one file from that cache, by its path in `files` |
+| POST   | `/generate/{id}/cancel`  | cancel a queued or running generate job |
 
 `POST /builds/{id}/cancel` takes the same `token`/`Authorization` auth as the
 other endpoints. If the build hasn't started yet it's pulled off the queue
@@ -225,6 +240,53 @@ curl -X POST http://localhost:8000/builds \
   -F callback_url=https://pretext.plus/api/build-complete \
   -F 'archive=@project.zip;type=application/zip'
 ```
+
+## Asset generation: `/generate`
+
+For previewing a single generated asset while authoring -- a `<latex-image>`,
+`<asymptote>`, `<sageplot>` or `<prefigure>` -- without building a document.
+The caller uploads a PreTeXt project exactly as for `/builds` (typically a
+synthesized one-figure project with the real document's `<docinfo>` and
+publication file), and the server runs `pretext generate` on it, on its own
+queue and worker so it never waits behind a build.
+
+`POST /generate` is `multipart/form-data` with the same `archive`, `token`
+and optional `callback_url` fields as `/builds`, plus:
+- `target` *(optional, default `web`)* — which target's formats to generate
+  (`web` gives SVG for latex-image/sageplot and HTML for asymptote).
+- `assets` *(optional, repeatable)* — asset types to generate, e.g.
+  `latex-image`; empty means every type found in the source. Names are passed
+  to the CLI, which rejects unknown ones (the job then fails with its log).
+
+```bash
+curl -X POST http://localhost:8000/generate \
+  -F token=testtoken -F target=web -F assets=latex-image \
+  -F 'archive=@project.zip;type=application/zip'
+```
+
+**The artifact is the CLI's asset cache**, `.cache/` at the project root
+(`GENERATE_OUTPUT_SUBDIR`), not the human-named `generated/` directory. Its
+files are named by a hash of each asset's extracted source,
+e.g. `latex-image/307b1ac33264207449c67f344ac9212e.svg`, and the status
+response and callback list them in `files`. That hash is the **cache key**:
+if the same file is later placed in `.cache/` of a full project archive
+submitted to `/builds`, the CLI copies it instead of regenerating the asset.
+The key depends on the asset body *and* the docinfo preamble/macros, so a
+preview project must carry the document's real `<docinfo>` for keys to match.
+Because the cache is keyed by content, not `xml:id`, submit one asset per job
+if you need to know which asset a key belongs to.
+
+Timings inside the warm image, per job, with the default 1 CPU / 1 GB limits:
+container start plus CLI startup is the floor (about 1s on a droplet; several
+seconds under Docker Desktop), latex-image and sageplot add well under a
+second, asymptote a couple of seconds. Local checks: `make test-generate`.
+
+Limits are `GENERATE_MEM_LIMIT`, `GENERATE_CPUS`, `GENERATE_PIDS_LIMIT`,
+`GENERATE_TIMEOUT` (see [.env.example](.env.example)); keep builds plus
+generates within the droplet's CPU/RAM. Scale with
+`docker compose up -d --scale generate-worker=N`. Asset types that need the
+network (webwork, youtube thumbnails, interactive previews) fail under
+`BUILD_NETWORK=none`.
 
 ## Hosting: why a Droplet, not App Platform
 
@@ -298,9 +360,11 @@ make up
 ```
 
 Take a Droplet **snapshot** once it works — rebuilding from scratch (5GB pull +
-warm-image build) is slow; restoring a snapshot is minutes. Concurrency ≈ droplet
-RAM ÷ `BUILD_MEM_LIMIT`; scale by running more `worker` replicas
-(`docker compose up -d --scale worker=N`).
+warm-image build) is slow; restoring a snapshot is minutes. Each `worker` runs one build at a time and
+each `generate-worker` one generate job at a time, so concurrency ≈ (droplet
+RAM − generate workers × `GENERATE_MEM_LIMIT`) ÷ `BUILD_MEM_LIMIT`; scale by
+running more replicas of either (`docker compose up -d --scale worker=N` /
+`--scale generate-worker=N`).
 
 ### TLS / reverse proxy (Caddy)
 
