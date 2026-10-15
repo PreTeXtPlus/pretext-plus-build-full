@@ -30,6 +30,9 @@ PREVIOUS_IMAGE="pretext-plus-build:warm-previous"
 MEM_LIMIT="${BUILD_MEM_LIMIT:-2g}"
 PIDS_LIMIT="${BUILD_PIDS_LIMIT:-512}"
 TIMEOUT="${BUILD_TIMEOUT:-600}"
+GEN_MEM_LIMIT="${GENERATE_MEM_LIMIT:-1g}"
+GEN_PIDS_LIMIT="${GENERATE_PIDS_LIMIT:-256}"
+GEN_TIMEOUT="${GENERATE_TIMEOUT:-120}"
 
 echo "==> Pulling latest pretextbook/pretext-full ..."
 docker pull pretextbook/pretext-full
@@ -50,6 +53,7 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 cp -r "$ROOT_DIR/tests/sample" "$tmp_root/sample"
 cp -r "$ROOT_DIR/tests/sample-journal" "$tmp_root/sample-journal"
+cp -r "$ROOT_DIR/tests/sample-generate" "$tmp_root/sample-generate"
 chmod -R 777 "$tmp_root"
 
 # Same prefix as the default BUILD_COMMAND (src/config.py): copy the image's
@@ -72,15 +76,36 @@ smoke_test_target() {
     sh -c "$SEED_LATEX_PACKAGES; pretext build $target"
 }
 
+# The /generate endpoint runs `pretext generate` under its own (smaller)
+# limits; this proves a candidate can still render each supported asset type
+# (latex-image, asymptote, sageplot) offline within them.
+smoke_test_generate() {
+  local project="$1" target="$2"
+  echo "==> Smoke-testing candidate image: project=$project generate -t $target ..."
+  timeout "$GEN_TIMEOUT" docker run --rm \
+    -v "$tmp_root/$project:/work" \
+    -w /work \
+    --network none \
+    --memory "$GEN_MEM_LIMIT" \
+    --pids-limit "$GEN_PIDS_LIMIT" \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    "$CANDIDATE_IMAGE" \
+    sh -c "pretext generate -t $target"
+}
+
 # tests/sample/project.ptx defines "web" (html) and "print" (pdf) targets --
 # the same two the warmup Dockerfile itself builds, so this exercises both
 # the HTML and LaTeX/PDF toolchains, which is where PreTeXt releases are most
 # likely to introduce a regression. tests/sample-journal builds a PDF in the
 # electron-j-combin style, whose texstyle needs a downloaded e-jc.sty -- with
 # --network none this only passes if the pre-fetched latex packages are found.
+# tests/sample-generate holds one latex-image, asymptote, and sageplot each,
+# generated under the /generate limits.
 if smoke_test_target sample web \
   && smoke_test_target sample print \
-  && smoke_test_target sample-journal print; then
+  && smoke_test_target sample-journal print \
+  && smoke_test_generate sample-generate web; then
   echo "==> Smoke test passed."
 else
   echo "==> Smoke test FAILED. Leaving '$WARM_IMAGE' untouched."

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Same layout pretext.plus's ProjectArchiveBuilder emits: generated
+     assets land in source/generated/, the cache in .cache/ at the root. -->
+<publication>
+  <source>
+    <directories external="external" generated="generated"/>
+  </source>
+  <html>
+    <resources host="cdn"/>
+  </html>
+</publication>

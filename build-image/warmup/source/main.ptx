@@ -40,6 +40,24 @@
           </latex-image>
         </image>
       </figure>
+      <!-- Asymptote and Sage each do first-run setup (asy's font/config
+           cache, Sage's ~/.sage) that would otherwise repeat in every
+           ephemeral generate container; running one of each bakes it in. -->
+      <figure>
+        <caption>An asymptote diagram forces Asymptote's first-run setup.</caption>
+        <image xml:id="fig-warmup-asy">
+          <asymptote>
+            size(3cm);
+            draw(unitcircle);
+          </asymptote>
+        </image>
+      </figure>
+      <figure>
+        <caption>A sageplot forces Sage's first-run setup.</caption>
+        <image xml:id="fig-warmup-sage">
+          <sageplot>plot(sin(x), (x, -pi, pi))</sageplot>
+        </image>
+      </figure>
       <!-- Interactive elements to set up puppeteer -->
       <p>
         Interactive elements to set up puppeteer.

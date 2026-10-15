@@ -13,9 +13,16 @@ from .config import settings
 
 _redis = redis.Redis.from_url(settings.redis_url)
 
-# default_timeout must exceed the build timeout so RQ doesn't reap a job that
-# is still legitimately building.
-queue = Queue("builds", connection=_redis, default_timeout=settings.build_timeout + 120)
+# One queue per job kind, each drained by its own worker service, so a
+# few-second generate job never waits behind a multi-minute build.
+# default_timeout must exceed the job's own timeout so RQ doesn't reap a job
+# that is still legitimately running.
+build_queue = Queue("builds", connection=_redis, default_timeout=settings.build_timeout + 120)
+generate_queue = Queue("generate", connection=_redis, default_timeout=settings.generate_timeout + 120)
+
+# URL prefix each job kind is served under. The API routes on it; the worker
+# uses it for the relative log/artifact URLs it puts in callbacks.
+JOB_PREFIXES = {"build": "/builds", "generate": "/generate"}
 
 
 def _now() -> str:

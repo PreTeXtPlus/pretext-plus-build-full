@@ -1,18 +1,24 @@
-"""The build job: runs ONE PreTeXt build inside a locked-down, ephemeral
-sibling container, then packages the output.
+"""The worker's jobs: run ONE PreTeXt command -- `pretext build` for a build
+job, `pretext generate` for an asset-generation job -- inside a locked-down,
+ephemeral sibling container, then package the output.
 
-This module runs in the *worker* process, the only component with access to
-the Docker socket. The build container it spawns has no socket, no network,
-dropped capabilities, and hard resource/time limits — so even though it runs
-user-submitted source (which can execute code via Sage/LaTeX), it can't reach
-the host or the rest of the system.
+This module runs in the *worker* processes, the only components with access
+to the Docker socket. The container they spawn has no socket, no network,
+dropped capabilities, and hard resource/time limits -- so even though it runs
+user-submitted source (which can execute code via Sage/LaTeX/Asymptote), it
+can't reach the host or the rest of the system.
+
+The two job kinds share everything except the command, the limits, and which
+project directory becomes the artifact (see Sandbox).
 """
+import json
 import logging
 import os
 import shlex
 import shutil
 import time
 import zipfile
+from dataclasses import dataclass
 
 import docker
 from docker.errors import ImageNotFound, APIError
@@ -25,16 +31,68 @@ from .notify import send_callback
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class Sandbox:
+    """Resource limits for one kind of job, plus which directory of the
+    project (relative to its root) is zipped as the artifact."""
+
+    mem_limit: str
+    cpus: float
+    pids_limit: int
+    timeout: int
+    output_subdir: str
+    # Leave top-level dotfiles out of the artifact. The CLI keeps its
+    # per-target asset hash table (.web_assets.json) in the cache root; it is
+    # bookkeeping for `pretext generate --only-changed`, not an asset.
+    skip_top_level_dotfiles: bool = False
+
+
+# Builds get the big limits. Generate jobs render a few assets in seconds and
+# run on their own queue/worker, so they get a smaller slice that fits
+# alongside a running build on the same host.
+BUILD_SANDBOX = Sandbox(
+    mem_limit=settings.build_mem_limit,
+    cpus=settings.build_cpus,
+    pids_limit=settings.build_pids_limit,
+    timeout=settings.build_timeout,
+    output_subdir=settings.output_subdir,
+)
+GENERATE_SANDBOX = Sandbox(
+    mem_limit=settings.generate_mem_limit,
+    cpus=settings.generate_cpus,
+    pids_limit=settings.generate_pids_limit,
+    timeout=settings.generate_timeout,
+    output_subdir=settings.generate_output_subdir,
+    skip_top_level_dotfiles=True,
+)
+
+
 def _now() -> str:
     return f"{time.time():.0f}"
 
 
-def _zip_dir(src_dir: str, zip_path: str) -> None:
+def _zip_dir(src_dir: str, zip_path: str, skip_top_level_dotfiles: bool = False) -> list[str]:
+    """Zip a directory tree. Returns the archived paths, relative and sorted.
+
+    Symlinks are skipped, and os.walk never descends into symlinked dirs. The
+    tree was written by user code running as root in the sandbox, which can
+    plant a link to anything the worker can read (another job's project,
+    /proc/1/environ with this process's secrets); following it would copy
+    that into a downloadable artifact."""
+    names = []
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for root, _, files in os.walk(src_dir):
             for name in files:
+                if skip_top_level_dotfiles and root == src_dir and name.startswith("."):
+                    continue
                 full = os.path.join(root, name)
-                z.write(full, os.path.relpath(full, src_dir))
+                if os.path.islink(full):
+                    logger.warning("skipping symlink in job output: %s", full)
+                    continue
+                rel = os.path.relpath(full, src_dir)
+                z.write(full, rel)
+                names.append(rel)
+    return sorted(names)
 
 
 def _prune_expired_jobs(current_job_id: str) -> None:
@@ -44,7 +102,7 @@ def _prune_expired_jobs(current_job_id: str) -> None:
     is created at the same moment, so a dir untouched for longer than job_ttl
     belongs to a job the API already 404s on. Runs in the worker because build
     containers run as root and leave root-owned files the host user can't
-    remove. Best effort: a failure here never affects a build."""
+    remove. Best effort: a failure here never affects a job."""
     cutoff = time.time() - settings.job_ttl
     try:
         with os.scandir(os.path.join(settings.data_dir, "jobs")) as entries:
@@ -59,17 +117,17 @@ def _prune_expired_jobs(current_job_id: str) -> None:
 
 
 class _Cancelled(Exception):
-    """Raised internally when a cancel request is noticed mid-build."""
+    """Raised internally when a cancel request is noticed mid-job."""
 
 
-def _wait_for_container(job_id: str, container) -> dict:
+def _wait_for_container(job_id: str, container, timeout: int) -> dict:
     """Wait for the container to finish, polling in short increments instead
-    of one long blocking call so a cancel request or the overall build
-    timeout can be noticed promptly.
+    of one long blocking call so a cancel request or the overall timeout can
+    be noticed promptly.
 
     Re-raises the underlying ReadTimeout/ConnectionError once the *total*
-    elapsed wait reaches settings.build_timeout, matching the previous
-    single-call behavior; raises _Cancelled if a cancel request lands first.
+    elapsed wait reaches `timeout`; raises _Cancelled if a cancel request
+    lands first.
     """
     elapsed = 0
     poll = settings.build_poll_interval
@@ -78,42 +136,63 @@ def _wait_for_container(job_id: str, container) -> dict:
             return container.wait(timeout=poll)
         except (ReadTimeout, ReqConnectionError):
             elapsed += poll
-            if elapsed >= settings.build_timeout:
+            if elapsed >= timeout:
                 raise
             if (store.get(job_id) or {}).get("cancel_requested") == "1":
                 raise _Cancelled()
 
 
 def run_build(job_id: str, target: str) -> None:
-    """Run the build, then fire the completion callback regardless of outcome.
+    """RQ entry point for a build job (queue "builds")."""
+    command = settings.build_command.format(target=shlex.quote(target))
+    _run_job(job_id, "build", command, BUILD_SANDBOX)
 
-    The callback lives in a `finally` so every terminal path — success, build
-    failure, timeout, misconfig — notifies the initiating host exactly once,
-    and a failing callback never propagates back into the build's status."""
-    logger.info("run_build(%s): starting, target=%s", job_id, target)
+
+def run_generate(job_id: str, target: str, assets: list[str]) -> None:
+    """RQ entry point for an asset-generation job (queue "generate").
+
+    `assets` is the list of asset types to generate (e.g. ["latex-image"]);
+    empty means every type the CLI finds in the source."""
+    command = settings.generate_command.format(
+        target=shlex.quote(target),
+        assets=" ".join(shlex.quote(a) for a in assets),
+    )
+    # The artifact lists its files: a generate job's cache holds a few files
+    # per asset, so the list is small enough to ride along in the status and
+    # callback, and it is how the caller learns each asset's cache key.
+    _run_job(job_id, "generate", command, GENERATE_SANDBOX, list_files=True)
+
+
+def _run_job(job_id: str, kind: str, command: str, sandbox: Sandbox, list_files: bool = False) -> None:
+    """Run the job, then fire the completion callback regardless of outcome.
+
+    The callback lives in a `finally` so every terminal path -- success,
+    failure, timeout, misconfig -- notifies the initiating host exactly once,
+    and a failing callback never propagates back into the job's status."""
+    logger.info("%s job %s: starting, command=%r", kind, job_id, command)
     try:
-        _run_build(job_id, target)
+        _run_sandboxed(job_id, kind, command, sandbox, list_files)
     finally:
         data = store.get(job_id) or {}
-        logger.info("run_build(%s): finished with status=%s, sending callback", job_id, data.get("status"))
+        logger.info("%s job %s: finished with status=%s, sending callback", kind, job_id, data.get("status"))
         send_callback(job_id)
         # After the callback, so a large deletion never delays the caller.
         _prune_expired_jobs(job_id)
 
 
-def _run_build(job_id: str, target: str) -> None:
+def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_files: bool) -> None:
     if not settings.host_data_dir:
         store.update(
             job_id,
             status="failed",
             finished_at=_now(),
-            log="Server misconfigured: HOST_DATA_DIR is unset, so build dirs "
+            log="Server misconfigured: HOST_DATA_DIR is unset, so job dirs "
             "cannot be mounted into build containers. See README.",
         )
         return
 
     if (store.get(job_id) or {}).get("cancel_requested") == "1":
-        store.update(job_id, status="cancelled", finished_at=_now(), log="Build cancelled before it started.")
+        store.update(job_id, status="cancelled", finished_at=_now(), log=f"{kind} cancelled before it started.")
         return
 
     store.update(job_id, status="running", started_at=_now())
@@ -123,11 +202,10 @@ def _run_build(job_id: str, target: str) -> None:
     # Host-side path of the same dir, for the sibling container's bind mount.
     host_work = os.path.join(settings.host_data_dir, "jobs", job_id, "work")
 
-    # The build runs as a non-root user; make the project root writable so it
-    # can create the output/ and generated-asset directories.
+    # The container may run as a non-root user; make the project root writable
+    # so it can create the output/ and generated-asset directories.
     os.chmod(work_dir, 0o777)
 
-    command = settings.build_command.format(target=shlex.quote(target))
     run_kwargs = dict(
         image=settings.build_image,
         command=["sh", "-c", command],
@@ -135,9 +213,9 @@ def _run_build(job_id: str, target: str) -> None:
         working_dir="/work",
         volumes={host_work: {"bind": "/work", "mode": "rw"}},
         network_mode=settings.build_network,
-        mem_limit=settings.build_mem_limit,
-        nano_cpus=int(settings.build_cpus * 1_000_000_000),
-        pids_limit=settings.build_pids_limit,
+        mem_limit=sandbox.mem_limit,
+        nano_cpus=int(sandbox.cpus * 1_000_000_000),
+        pids_limit=sandbox.pids_limit,
         cap_drop=["ALL"],
         security_opt=["no-new-privileges"],
     )
@@ -153,7 +231,7 @@ def _run_build(job_id: str, target: str) -> None:
     try:
         container = client.containers.run(**run_kwargs)
         try:
-            result = _wait_for_container(job_id, container)
+            result = _wait_for_container(job_id, container, sandbox.timeout)
             exit_code = int(result.get("StatusCode", 1))
         except _Cancelled:
             container.kill()
@@ -162,7 +240,7 @@ def _run_build(job_id: str, target: str) -> None:
                 job_id,
                 status="cancelled",
                 finished_at=_now(),
-                log=logs + "\n\n[build cancelled by request]",
+                log=logs + f"\n\n[{kind} cancelled by request]",
             )
             return
         except (ReadTimeout, ReqConnectionError):
@@ -172,7 +250,7 @@ def _run_build(job_id: str, target: str) -> None:
                 job_id,
                 status="failed",
                 finished_at=_now(),
-                log=logs + f"\n\n[build exceeded {settings.build_timeout}s and was killed]",
+                log=logs + f"\n\n[{kind} exceeded {sandbox.timeout}s and was killed]",
             )
             return
         logs = container.logs().decode(errors="replace")
@@ -192,24 +270,28 @@ def _run_build(job_id: str, target: str) -> None:
             except APIError:
                 pass
 
-    # Zip whatever output/ exists regardless of exit code: a nonzero exit
-    # doesn't always mean the build produced nothing usable (e.g. one target
-    # in a multi-target build failed, or the failure happened after the
-    # bulk of the output was written). Callers can tell success from a
-    # failure-with-output by status; the artifact is offered either way.
-    output_dir = os.path.join(work_dir, settings.output_subdir)
-    has_output = os.path.isdir(output_dir)
+    # Zip whatever output exists regardless of exit code: a nonzero exit
+    # doesn't always mean the job produced nothing usable (e.g. one target
+    # in a multi-target build failed, or one of several assets failed to
+    # generate after the others were written). Callers can tell success from
+    # a failure-with-output by status; the artifact is offered either way.
+    output_dir = os.path.join(work_dir, sandbox.output_subdir)
+    # A symlinked output dir would be the same trick as above, one level up.
+    has_output = os.path.isdir(output_dir) and not os.path.islink(output_dir)
+    extra = {}
     if has_output:
-        _zip_dir(output_dir, os.path.join(job_dir, "output.zip"))
+        names = _zip_dir(output_dir, os.path.join(job_dir, "output.zip"), sandbox.skip_top_level_dotfiles)
+        if list_files:
+            extra["files"] = json.dumps(names)
 
     if exit_code != 0:
         log = logs
         if has_output:
             log += (
-                f"\n\n[build exited with code {exit_code}, but produced output in "
-                f"'{settings.output_subdir}/' -- see artifact_url]"
+                f"\n\n[{kind} exited with code {exit_code}, but produced output in "
+                f"'{sandbox.output_subdir}/' -- see artifact_url]"
             )
-        store.update(job_id, status="failed", finished_at=_now(), log=log, exit_code=exit_code)
+        store.update(job_id, status="failed", finished_at=_now(), log=log, exit_code=exit_code, **extra)
         return
 
     if not has_output:
@@ -218,8 +300,8 @@ def _run_build(job_id: str, target: str) -> None:
             status="failed",
             finished_at=_now(),
             exit_code=exit_code,
-            log=logs + f"\n\n[build succeeded but produced no '{settings.output_subdir}/' directory]",
+            log=logs + f"\n\n[{kind} succeeded but produced no '{sandbox.output_subdir}/' directory]",
         )
         return
 
-    store.update(job_id, status="success", finished_at=_now(), log=logs, exit_code=exit_code)
+    store.update(job_id, status="success", finished_at=_now(), log=logs, exit_code=exit_code, **extra)
