@@ -3,7 +3,7 @@
      assets land in source/generated/, the cache in .cache/ at the root. -->
 <publication>
   <source>
-    <directories external="external" generated="generated"/>
+    <directories generated="generated"/>
   </source>
   <html>
     <resources host="cdn"/>
