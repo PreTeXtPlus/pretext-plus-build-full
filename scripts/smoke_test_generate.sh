@@ -12,6 +12,9 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 API="${API:-http://localhost:8000}"
 TARGET="${TARGET:-web}"
 ASSETS="${ASSETS:-}"
+# Names the persistent asset cache the results are harvested into (README
+# "Persistent asset cache"). Empty = no cache.
+PROJECT_ID="${PROJECT_ID:-smoke-sample}"
 SAMPLE_DIR="$ROOT_DIR/tests/sample-generate"
 
 # Same token resolution as smoke_test.sh: shell env wins, else .env.
@@ -29,7 +32,7 @@ archive="$tmp/project.zip"
 
 echo "==> Submitting generate job to $API (assets: ${ASSETS:-all}) ..."
 resp="$(curl -sf -X POST "$API/generate" \
-  -F "token=$TOKEN" -F "target=$TARGET" -F "assets=$ASSETS" \
+  -F "token=$TOKEN" -F "target=$TARGET" -F "assets=$ASSETS" -F "project_id=$PROJECT_ID" \
   -F "archive=@$archive;type=application/zip")"
 job_id="$(printf '%s' "$resp" | jq_get job_id)"
 [ -n "$job_id" ] || { echo "No job_id in response: $resp"; exit 1; }
@@ -52,6 +55,16 @@ for _ in $(seq 1 150); do
       curl -sf "$API/generate/$job_id/artifact" -o "$tmp/output.zip"
       echo "==> Artifact contents:"
       unzip -l "$tmp/output.zip"
+      # When the stack runs on this machine, every file in `files` must now
+      # also sit in ./data/asset-cache/<project>/ (harvested by the worker).
+      cache_dir="$ROOT_DIR/data/asset-cache/$PROJECT_ID"
+      if [ -n "$PROJECT_ID" ] && [ -d "$ROOT_DIR/data/asset-cache" ]; then
+        printf '%s' "$s" | python3 -c 'import sys,json; [print(f) for f in json.load(sys.stdin)["files"]]' \
+        | while read -r f; do
+            [ -f "$cache_dir/$f" ] || { echo "==> Not harvested into the asset cache: $f"; exit 1; }
+          done
+        echo "==> All files harvested into $cache_dir"
+      fi
       echo "==> SUCCESS"
       exit 0 ;;
     failed)

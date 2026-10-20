@@ -8,8 +8,10 @@ dropped capabilities, and hard resource/time limits -- so even though it runs
 user-submitted source (which can execute code via Sage/LaTeX/Asymptote), it
 can't reach the host or the rest of the system.
 
-The two job kinds share everything except the command, the limits, and which
-project directory becomes the artifact (see Sandbox).
+The two job kinds share everything except the command, the limits, which
+project directory becomes the artifact (see Sandbox), and how they meet the
+project's persistent asset cache when the job names a project_id: a build
+mounts it, a generate job is harvested into it (see asset_cache.py).
 """
 import json
 import logging
@@ -24,6 +26,7 @@ import docker
 from docker.errors import ImageNotFound, APIError
 from requests.exceptions import ReadTimeout, ConnectionError as ReqConnectionError
 
+from . import asset_cache
 from .config import settings
 from .jobs import store
 from .notify import send_callback
@@ -178,6 +181,10 @@ def _run_job(job_id: str, kind: str, command: str, sandbox: Sandbox, list_files:
         send_callback(job_id)
         # After the callback, so a large deletion never delays the caller.
         _prune_expired_jobs(job_id)
+        try:
+            asset_cache.prune(keep_project_id=data.get("project_id") or None)
+        except Exception as e:  # best effort, like the job pruning above
+            logger.warning("pruning the asset cache failed: %s", e)
 
 
 def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_files: bool) -> None:
@@ -191,9 +198,12 @@ def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_
         )
         return
 
-    if (store.get(job_id) or {}).get("cancel_requested") == "1":
+    data = store.get(job_id) or {}
+    if data.get("cancel_requested") == "1":
         store.update(job_id, status="cancelled", finished_at=_now(), log=f"{kind} cancelled before it started.")
         return
+    # Validated by the API before it was stored; the id names a dir on the host.
+    project_id = data.get("project_id") or None
 
     store.update(job_id, status="running", started_at=_now())
 
@@ -206,12 +216,32 @@ def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_
     # so it can create the output/ and generated-asset directories.
     os.chmod(work_dir, 0o777)
 
+    volumes = {host_work: {"bind": "/work", "mode": "rw"}}
+    if project_id:
+        try:
+            asset_cache.touch(project_id)
+            if kind == "build":
+                # Cache files the caller shipped inside the archive would be
+                # hidden by the mount, so promote them into the persistent
+                # cache first.
+                seeded = asset_cache.harvest(project_id, work_dir)
+                if seeded:
+                    logger.info("%s job %s: %d cache file(s) from the archive added to project %s",
+                                kind, job_id, len(seeded), project_id)
+                volumes.update(asset_cache.mounts(project_id, work_dir))
+        except Exception as e:
+            # The cache is an optimization: run the job without it rather
+            # than fail it. (A generate job's later harvest is guarded too.)
+            logger.warning("%s job %s: asset cache for project %s unavailable, running without: %s",
+                           kind, job_id, project_id, e)
+            volumes = {host_work: {"bind": "/work", "mode": "rw"}}
+
     run_kwargs = dict(
         image=settings.build_image,
         command=["sh", "-c", command],
         detach=True,
         working_dir="/work",
-        volumes={host_work: {"bind": "/work", "mode": "rw"}},
+        volumes=volumes,
         network_mode=settings.build_network,
         mem_limit=sandbox.mem_limit,
         nano_cpus=int(sandbox.cpus * 1_000_000_000),
@@ -283,6 +313,16 @@ def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_
         names = _zip_dir(output_dir, os.path.join(job_dir, "output.zip"), sandbox.skip_top_level_dotfiles)
         if list_files:
             extra["files"] = json.dumps(names)
+
+    # A generate job has no cache mount (its artifact must be only what it
+    # made), so copy its results into the project's cache now. Only after a
+    # clean exit: a killed container can leave a half-written file behind.
+    if project_id and kind == "generate" and exit_code == 0:
+        try:
+            cached = asset_cache.harvest(project_id, work_dir)
+            extra["cached_files"] = json.dumps(cached)
+        except Exception as e:  # the job itself still succeeded
+            logger.warning("%s job %s: caching results for project %s failed: %s", kind, job_id, project_id, e)
 
     if exit_code != 0:
         log = logs
