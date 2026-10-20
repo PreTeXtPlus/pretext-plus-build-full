@@ -11,7 +11,13 @@ export HOST_DATA_DIR
 # no builds have run lately or JOB_TTL was lowered.
 JOB_MAX_AGE_MIN ?= 1500
 
-.PHONY: up down logs test test-generate pull-real warm-image update-warm-image disk-usage prune-images prune-jobs clean
+# Per-project asset caches unused for longer than this (minutes) are deleted
+# by `make prune-asset-cache`. The worker already evicts them after each job
+# (ASSET_CACHE_MAX_AGE_DAYS / ASSET_CACHE_MAX_GB in .env); this is for when
+# no jobs have run lately. Default: 30 days, matching the worker's default.
+ASSET_CACHE_MAX_AGE_MIN ?= 43200
+
+.PHONY: up down logs test test-generate pull-real warm-image update-warm-image disk-usage prune-images prune-jobs prune-asset-cache clean
 
 up:            ## Build images and start the stack (detached)
 	docker compose up --build -d
@@ -41,6 +47,7 @@ disk-usage:    ## Show what's using disk: filesystem, Docker, job dirs
 	df -h /
 	docker system df
 	du -sh $(HOST_DATA_DIR)/jobs 2>/dev/null || true
+	du -sh $(HOST_DATA_DIR)/asset-cache/* 2>/dev/null || true
 
 prune-images:  ## Remove stopped containers, untagged images, and build cache (keeps :warm, :warm-previous, volumes)
 	docker container prune -f
@@ -51,4 +58,8 @@ prune-jobs:    ## Delete job dirs older than JOB_MAX_AGE_MIN (root-owned, so rem
 	docker run --rm -v $(HOST_DATA_DIR)/jobs:/jobs alpine \
 		find /jobs -mindepth 1 -maxdepth 1 -type d -mmin +$(JOB_MAX_AGE_MIN) -exec rm -rf {} +
 
-clean: prune-images prune-jobs ## Reclaim disk: prune-images + prune-jobs
+prune-asset-cache: ## Delete per-project asset caches unused for ASSET_CACHE_MAX_AGE_MIN (root-owned, so removed via a container)
+	docker run --rm -v $(HOST_DATA_DIR)/asset-cache:/cache alpine \
+		find /cache -mindepth 1 -maxdepth 1 -type d -mmin +$(ASSET_CACHE_MAX_AGE_MIN) -exec rm -rf {} +
+
+clean: prune-images prune-jobs ## Reclaim disk: prune-images + prune-jobs (not the asset cache; see prune-asset-cache)

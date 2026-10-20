@@ -82,6 +82,27 @@ class Settings:
     # to skip regenerating that asset when the same file is placed back here.
     generate_output_subdir = os.getenv("GENERATE_OUTPUT_SUBDIR", ".cache")
 
+    # --- Persistent asset cache (per project, on the host) ---
+    # When a job names a `project_id`, the CLI's generated-asset cache for
+    # that project lives under DATA_DIR/<ASSET_CACHE_SUBDIR>/<project_id>/ and
+    # is mounted into builds / harvested from generate jobs, so assets that
+    # were previewed or built before are copied rather than regenerated. See
+    # asset_cache.py. Jobs without a project_id get no persistent cache.
+    asset_cache_subdir = os.getenv("ASSET_CACHE_SUBDIR", "asset-cache")
+    # The asset types the CLI caches by content hash (its generated-cache
+    # subdirectory names). Only these are mounted/harvested.
+    asset_cache_types = [
+        t.strip()
+        for t in os.getenv("ASSET_CACHE_TYPES", "latex-image,asymptote,sageplot,prefigure").split(",")
+        if t.strip()
+    ]
+    # A project's whole cache is evicted once no job has used it for this
+    # long, and the least recently used projects are evicted when the cache
+    # as a whole exceeds the size cap (0 = no cap). The worker checks after
+    # every job.
+    asset_cache_max_age = int(float(os.getenv("ASSET_CACHE_MAX_AGE_DAYS", "30")) * 86400)  # seconds
+    asset_cache_max_bytes = int(float(os.getenv("ASSET_CACHE_MAX_GB", "5")) * 1024**3)
+
     # --- Completion callback (optional webhook) ---
     # If a /builds request includes a callback_url, the worker POSTs the final
     # job status there once the build reaches a terminal state (success/failed).

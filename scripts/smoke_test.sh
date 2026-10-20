@@ -8,6 +8,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 API="${API:-http://localhost:8000}"
 TARGET="${TARGET:-web}"
+# Names the persistent asset cache the build mounts (README "Persistent asset
+# cache"). Empty = build without one.
+PROJECT_ID="${PROJECT_ID:-smoke-sample}"
 SAMPLE_DIR="$ROOT_DIR/tests/sample"
 
 # BUILD_TOKEN in the shell env wins; otherwise fall back to whatever `make up`
@@ -28,7 +31,7 @@ archive="$tmp/project.zip"
 
 echo "==> Submitting build to $API ..."
 resp="$(curl -sf -X POST "$API/builds" \
-  -F "token=$TOKEN" -F "target=$TARGET" \
+  -F "token=$TOKEN" -F "target=$TARGET" -F "project_id=$PROJECT_ID" \
   -F "archive=@$archive;type=application/zip")"
 job_id="$(printf '%s' "$resp" | jq_get job_id)"
 [ -n "$job_id" ] || { echo "No job_id in response: $resp"; exit 1; }
@@ -44,6 +47,15 @@ for _ in $(seq 1 150); do
       curl -sf "$API/builds/$job_id/artifact" -o "$tmp/output.zip"
       echo "==> Artifact contents:"
       unzip -l "$tmp/output.zip"
+      # When the stack runs on this machine, the build's cache dirs were
+      # mounted from ./data/asset-cache, so anything the build cached is
+      # visible here (the fake BUILD_COMMAND writes one latex-image file).
+      cache_dir="$ROOT_DIR/data/asset-cache/$PROJECT_ID"
+      if [ -n "$PROJECT_ID" ] && [ -d "$ROOT_DIR/data/asset-cache" ]; then
+        [ -d "$cache_dir/latex-image" ] || { echo "==> Missing asset cache dir $cache_dir/latex-image"; exit 1; }
+        echo "==> Asset cache for project $PROJECT_ID:"
+        find "$cache_dir" -type f | sed 's/^/    /'
+      fi
       echo "==> SUCCESS"
       exit 0 ;;
     failed)
