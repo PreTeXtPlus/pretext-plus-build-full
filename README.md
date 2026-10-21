@@ -148,7 +148,34 @@ uses it even if the upstream image lags. The dispatch needs a token on the
 pretext-cli side (`PRETEXT_PLUS_DISPATCH_TOKEN`) that can dispatch to this repo.
 It needs the
 Docker daemon and the deployed repo on the droplet, so it can't run on a
-GitHub-hosted runner. Configure these repo secrets:
+GitHub-hosted runner; instead it SSHes in with a key of its own, kept in this
+repo's Actions secrets.
+
+#### One-time setup: the droplet SSH secrets
+
+Until these secrets exist, every run fails at its first step, "Check the
+droplet SSH secrets are set". To create them, run this **from your own
+machine** (not the droplet; on Windows, from Git Bash), with the host and user
+you normally SSH into the droplet as:
+
+```bash
+bash scripts/setup_ci_secrets.sh <droplet-ip-or-hostname> <ssh-user> [port]
+```
+
+It needs `ssh`, `ssh-keygen`, and `gh` (logged in, with admin access to this
+repo), and:
+
+1. generates a new passphrase-less ed25519 key just for the workflow;
+2. adds its public half to that user's `~/.ssh/authorized_keys` on the droplet,
+   replacing any key an earlier run added;
+3. logs in with the new key to check that `~/pretext-plus-build-full` can
+   `git fetch` from GitHub and that the user can run `docker` without `sudo`;
+4. stores the secrets below with `gh secret set`;
+5. deletes the local copy of the private key.
+
+Re-running it rotates the key. If the repo lives elsewhere on the droplet, set
+`REPO_PATH` (relative to the user's home) for the script, and pass the same
+path as the `repo_path` input on manual runs.
 
 | Secret | Purpose |
 |---|---|
@@ -157,9 +184,15 @@ GitHub-hosted runner. Configure these repo secrets:
 | `DROPLET_SSH_KEY` | Private key for that user, with **no** passphrase |
 | `DROPLET_SSH_PORT` | Optional, defaults to `22` |
 
-The workflow assumes the repo is cloned at `~/pretext-plus-build-full` on the
-droplet (the `workflow_dispatch` form lets you override this per-run) and that
-the SSH user can `git pull` and run `docker` there without `sudo`.
+#### Catching up on a missed release
+
+If a release-triggered run failed, rebuild for that version by hand (a manual
+run skips the wait for `pretext-full`):
+
+```bash
+gh workflow run update-warm-image.yml -f pretext_version=2.56.0
+gh run watch
+```
 
 ## Disk space
 

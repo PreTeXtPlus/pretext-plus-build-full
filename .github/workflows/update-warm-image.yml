@@ -37,6 +37,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
+      # Fail in seconds -- not after the up-to-two-hour wait below -- when the
+      # droplet's SSH secrets were never configured. Set them up by running
+      # scripts/setup_ci_secrets.sh from your own machine (README, "Running it
+      # from GitHub Actions").
+      - name: Check the droplet SSH secrets are set
+        env:
+          HOST: ${{ secrets.DROPLET_SSH_HOST }}
+          SSH_USER: ${{ secrets.DROPLET_SSH_USER }}
+          KEY: ${{ secrets.DROPLET_SSH_KEY }}
+        run: |
+          missing=""
+          [ -n "$HOST" ] || missing="$missing DROPLET_SSH_HOST"
+          [ -n "$SSH_USER" ] || missing="$missing DROPLET_SSH_USER"
+          [ -n "$KEY" ] || missing="$missing DROPLET_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repo secrets:$missing. Run scripts/setup_ci_secrets.sh from your own machine to create them (see the README section 'Running it from GitHub Actions')."
+            exit 1
+          fi
+
       - name: Resolve PreTeXt CLI version
         id: cli
         env:
@@ -92,4 +111,6 @@ jobs:
             cd "$HOME/$REPO_PATH"
             # Pick up any changes to update_warm_image.sh itself before running it.
             git pull --ff-only
-            ./scripts/update_warm_image.sh
+            # Via bash, as the Makefile does: the script isn't committed with
+            # its executable bit, so running it directly fails on a fresh clone.
+            bash ./scripts/update_warm_image.sh
