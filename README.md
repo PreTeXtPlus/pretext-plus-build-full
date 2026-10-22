@@ -155,8 +155,9 @@ repo's Actions secrets.
 
 Until these secrets exist, every run fails at its first step, "Check the
 droplet SSH secrets are set". To create them, run this **from your own
-machine** (not the droplet; on Windows, from Git Bash), with the host and user
-you normally SSH into the droplet as:
+machine** (not the droplet; on Windows, from Git Bash), with the droplet's IP
+and the user that owns the repo there (`root` if you ran `provision.sh` as
+root):
 
 ```bash
 bash scripts/setup_ci_secrets.sh <droplet-ip-or-hostname> <ssh-user> [port]
@@ -167,7 +168,10 @@ repo), and:
 
 1. generates a new passphrase-less ed25519 key just for the workflow;
 2. adds its public half to that user's `~/.ssh/authorized_keys` on the droplet,
-   replacing any key an earlier run added;
+   replacing any key an earlier run added. If this machine can't SSH in (for
+   example, you only use DigitalOcean's web console), it prints one line to
+   paste into the droplet's console (**Access → Launch Droplet Console**) and
+   waits for you to press Enter;
 3. logs in with the new key to check that `~/pretext-plus-build-full` can
    `git fetch` from GitHub and that the user can run `docker` without `sudo`;
 4. stores the secrets below with `gh secret set`;
