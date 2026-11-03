@@ -11,7 +11,11 @@ TARGET="${TARGET:-web}"
 # Names the persistent asset cache the build mounts (README "Persistent asset
 # cache"). Empty = build without one.
 PROJECT_ID="${PROJECT_ID:-smoke-sample}"
-SAMPLE_DIR="$ROOT_DIR/tests/sample"
+SAMPLE_DIR="${SAMPLE_DIR:-$ROOT_DIR/tests/sample}"
+# Optional extended regex: fail if the log of a *successful* build matches it.
+# For steps the CLI lets fail without failing the build (`make test-webwork`
+# uses it for WeBWorK generation).
+FAIL_IF_LOG_MATCHES="${FAIL_IF_LOG_MATCHES:-}"
 
 # BUILD_TOKEN in the shell env wins; otherwise fall back to whatever `make up`
 # actually deployed (.env, read by docker compose), so `make test` matches the
@@ -55,6 +59,14 @@ for _ in $(seq 1 150); do
         [ -d "$cache_dir/latex-image" ] || { echo "==> Missing asset cache dir $cache_dir/latex-image"; exit 1; }
         echo "==> Asset cache for project $PROJECT_ID:"
         find "$cache_dir" -type f | sed 's/^/    /'
+      fi
+      if [ -n "$FAIL_IF_LOG_MATCHES" ]; then
+        log="$(printf '%s' "$s" | jq_get log)"
+        if printf '%s' "$log" | grep -Eq "$FAIL_IF_LOG_MATCHES"; then
+          echo "==> Build succeeded, but its log matches '$FAIL_IF_LOG_MATCHES':"
+          printf '%s\n' "$log" | grep -E -B3 -A10 "$FAIL_IF_LOG_MATCHES"
+          exit 1
+        fi
       fi
       echo "==> SUCCESS"
       exit 0 ;;

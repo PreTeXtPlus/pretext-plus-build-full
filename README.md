@@ -24,13 +24,17 @@ pretext.plus ──HTTP──> API (FastAPI) ──> Redis (queues + status)
 - **API** — accepts a zipped/tarred project, enqueues a job, serves status and
   artifacts. Has **no** Docker access.
 - **Worker** — the only component with the Docker socket. For each job it spawns
-  a fresh, locked-down `pretext-full` container (no network, dropped caps,
-  CPU/memory/pid/time limits, non-root) to run the build, then zips the output.
+  a fresh, locked-down `pretext-full` container (no network beyond the
+  WeBWorK server, dropped caps, CPU/memory/pid/time limits, non-root) to run
+  the build, then zips the output.
 - **Generate worker** — the same image and code, draining a separate queue of
   `pretext generate` jobs (asset previews, seconds each) with smaller limits.
   An RQ worker runs one job at a time, so without it a preview would wait
   behind a running multi-minute build. See [Asset generation](#asset-generation-generate).
 - **Redis** — work queues (RQ) and per-job status.
+- **Egress proxy** — the build containers' only way out: forwards to an
+  allowlist of hosts (the WeBWorK server). See
+  [Network access](#network-access-webwork).
 
 Why a fresh container per build: isolation between users, clean reproducible
 state, and the ability to use the official image unmodified.
@@ -43,7 +47,7 @@ with no multi-GB download.
 
 ```bash
 cp .env.example .env      # fake-build mode is the default
-make up                   # start api + worker + generate-worker + redis
+make up                   # start api + workers + redis + egress-proxy
 make test                 # zip the sample project, submit, poll, fetch artifact
 make test-generate        # same for the asset-generation endpoint
 make logs                 # watch what's happening
@@ -88,7 +92,9 @@ make up                    # always use `make up`, not `docker compose up`,
 make test
 ```
 
-Builds now start warm and need no network (`BUILD_NETWORK=none`). See
+Builds now start warm and need no general network access; they reach only
+the WeBWorK server, through an allowlisting proxy (see
+[Network access](#network-access-webwork)). See
 [build-image/](build-image/) for the warmup project and Dockerfile.
 
 **Journal styles.** Some journal texstyles (AMS, E-JC, Springer, …) need
@@ -337,8 +343,9 @@ Limits are `GENERATE_MEM_LIMIT`, `GENERATE_CPUS`, `GENERATE_PIDS_LIMIT`,
 `GENERATE_TIMEOUT` (see [.env.example](.env.example)); keep builds plus
 generates within the droplet's CPU/RAM. Scale with
 `docker compose up -d --scale generate-worker=N`. Asset types that need the
-network (webwork, youtube thumbnails, interactive previews) fail under
-`BUILD_NETWORK=none`.
+network, such as youtube thumbnails and interactive previews, fail. The
+exception is WeBWorK, whose server is reachable through the egress proxy (see
+[Network access](#network-access-webwork)).
 
 ## Persistent asset cache
 
@@ -389,6 +396,53 @@ leave a truncated file in the mounted cache, which the next build would use
 as-is. The fix belongs in the CLI (write cache files to a temp name and
 rename); until then, `pretext build -g` on the affected project, or deleting
 the file from `data/asset-cache/<project_id>/`, clears it.
+
+## Network access (WeBWorK)
+
+Build and generate containers run user code (Sage, LaTeX, Asymptote, PG), so
+they get no general network access. The one exception is WeBWorK: PreTeXt
+renders every `<webwork>` problem at build time by posting it to a webwork2
+server's `render_rpc` and downloading its images. Problems from the Open
+Problem Library (`<webwork source="Library/...">`) always go to the server,
+even with local PG processing. By default that server is the AIM server,
+`webwork-ptx.aimath.org`.
+
+So builds can reach that one host and nothing else:
+
+```
+build container ──► pretext-build-egress ──► egress-proxy ──► webwork-ptx.aimath.org:443
+                    (internal network:        (tinyproxy;
+                     no route out, no          allowlist from
+                     host address)             EGRESS_ALLOW_HOSTS)
+```
+
+- **`pretext-build-egress`** is a compose network with `internal: true` and
+  `com.docker.network.bridge.inhibit_ipv4`, so containers on it can reach
+  each other and nothing else: not the internet, not the cloud metadata
+  endpoint, not services on the host. Builds join it via `BUILD_NETWORK`.
+- **`egress-proxy`** ([egress-proxy/](egress-proxy/)) sits on that network
+  and on the compose default network. It forwards only to the host names
+  listed in `EGRESS_ALLOW_HOSTS`, exact match, with HTTPS on port 443 only.
+  Every other request gets a 403, which PreTeXt handles the way it handled
+  no network at all.
+- **`BUILD_PROXY`** is passed into the build container as
+  `HTTP(S)_PROXY`, which Python's `requests` (and so PreTeXt) uses. A program
+  that ignores it just fails, since the network has no other way out.
+
+A publication file that names a different WeBWorK server
+(`<webwork server="...">`) only works once that host is added to
+`EGRESS_ALLOW_HOSTS` (then `make up`). The proxy logs every request and
+refusal: `docker compose logs egress-proxy`. To turn network access off
+entirely, set `BUILD_NETWORK=none` and empty `BUILD_PROXY`; WeBWorK
+generation then fails and the build continues without it.
+
+`make test-webwork` (real mode) builds [tests/sample-webwork](tests/sample-webwork/),
+with one authored and one OPL problem, and fails if WeBWorK generation did.
+
+**Load on the AIM server.** The CLI's per-target hash table is not kept
+between builds (see [Persistent asset cache](#persistent-asset-cache)), and
+`generated-assets/webwork/` is not cached, so every build of a book re-renders
+all its WeBWorK problems on the AIM server.
 
 ## Hosting: why a Droplet, not App Platform
 

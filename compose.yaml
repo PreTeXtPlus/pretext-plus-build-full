@@ -56,6 +56,9 @@ services:
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       - redis
+      # Its compose definition also creates the build-egress network that
+      # BUILD_NETWORK names, so it must be up before any build starts.
+      - egress-proxy
 
   # Same image, socket, and data mount as `worker`, but it drains the
   # "generate" queue (asset previews, seconds each) so a generate job never
@@ -74,6 +77,35 @@ services:
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       - redis
+      - egress-proxy
+
+  # The build containers' only way out (README "Network access"). Builds run
+  # on the internal build-egress network, which has no route anywhere; this
+  # proxy is on that network and on the default one, and forwards HTTP(S) only
+  # to the hosts in EGRESS_ALLOW_HOSTS. Deliberately no env_file: it needs none
+  # of the API's secrets. Its port is not published on the host.
+  egress-proxy:
+    build: ./egress-proxy
+    restart: unless-stopped
+    environment:
+      EGRESS_ALLOW_HOSTS: ${EGRESS_ALLOW_HOSTS:-webwork-ptx.aimath.org}
+    networks:
+      - default
+      - build-egress
+
+networks:
+  # Fixed name (no compose project prefix) so BUILD_NETWORK can name it.
+  # internal: containers on it reach each other (i.e. the proxy) and nothing
+  # else -- not the internet, not the cloud metadata endpoint.
+  # inhibit_ipv4: by default the host also gets an address on the bridge, and
+  # anything listening on all host interfaces (Caddy, sshd) would be
+  # reachable at it, behind the cloud firewall's back. Without it, the
+  # bridge carries container-to-container traffic only.
+  build-egress:
+    name: pretext-build-egress
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
 
 volumes:
   redis-data:

@@ -3,10 +3,11 @@ job, `pretext generate` for an asset-generation job -- inside a locked-down,
 ephemeral sibling container, then package the output.
 
 This module runs in the *worker* processes, the only components with access
-to the Docker socket. The container they spawn has no socket, no network,
-dropped capabilities, and hard resource/time limits -- so even though it runs
-user-submitted source (which can execute code via Sage/LaTeX/Asymptote), it
-can't reach the host or the rest of the system.
+to the Docker socket. The container they spawn has no socket, dropped
+capabilities, and hard resource/time limits, and its network reaches only an
+allowlisting egress proxy (or nothing, with BUILD_NETWORK=none) -- so even
+though it runs user-submitted source (which can execute code via
+Sage/LaTeX/Asymptote), it can't reach the host or the rest of the system.
 
 The two job kinds share everything except the command, the limits, which
 project directory becomes the artifact (see Sandbox), and how they meet the
@@ -187,6 +188,25 @@ def _run_job(job_id: str, kind: str, command: str, sandbox: Sandbox, list_files:
             logger.warning("pruning the asset cache failed: %s", e)
 
 
+def _container_environment() -> dict:
+    """Environment variables set in the job container (none by default, so
+    the image's own environment stands)."""
+    env = {}
+    # Only override HOME if explicitly configured; otherwise keep the image's
+    # HOME so the baked ~/.ptx is found.
+    if settings.build_home:
+        env["HOME"] = settings.build_home
+    # Point HTTP clients (PreTeXt's WeBWorK requests via `requests`, which
+    # reads either spelling) at the egress proxy. The container's network
+    # has no other way out, so a client that ignores these just fails, as it
+    # would with no network.
+    if settings.build_proxy:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            env[name] = settings.build_proxy
+        env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
+    return env
+
+
 def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_files: bool) -> None:
     if not settings.host_data_dir:
         store.update(
@@ -251,10 +271,9 @@ def _run_sandboxed(job_id: str, kind: str, command: str, sandbox: Sandbox, list_
     )
     if settings.build_user:
         run_kwargs["user"] = settings.build_user
-    # Only override HOME if explicitly configured; otherwise keep the image's
-    # HOME so the baked ~/.ptx is found.
-    if settings.build_home:
-        run_kwargs["environment"] = {"HOME": settings.build_home}
+    environment = _container_environment()
+    if environment:
+        run_kwargs["environment"] = environment
 
     client = docker.from_env()
     container = None

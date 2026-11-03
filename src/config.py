@@ -44,7 +44,14 @@ class Settings:
     )
 
     # --- Sandbox limits applied to every build container ---
+    # Docker network the build container joins. "none" = no network at all.
+    # In production this is the compose network "pretext-build-egress"
+    # (internal: its only reachable host is the egress proxy), together with
+    # BUILD_PROXY below. See README "Network access".
     build_network = os.getenv("BUILD_NETWORK", "none")
+    # Proxy URL handed to the build container as HTTP(S)_PROXY, e.g.
+    # http://egress-proxy:8888. Empty = no proxy variables are set.
+    build_proxy = os.getenv("BUILD_PROXY", "")
     build_mem_limit = os.getenv("BUILD_MEM_LIMIT", "2g")
     build_cpus = float(os.getenv("BUILD_CPUS", "2"))
     build_pids_limit = int(os.getenv("BUILD_PIDS_LIMIT", "512"))
