@@ -17,7 +17,7 @@ JOB_MAX_AGE_MIN ?= 1500
 # no jobs have run lately. Default: 30 days, matching the worker's default.
 ASSET_CACHE_MAX_AGE_MIN ?= 43200
 
-.PHONY: up down logs test test-generate pull-real warm-image update-warm-image disk-usage prune-images prune-jobs prune-asset-cache clean
+.PHONY: up down logs test test-generate test-webwork pull-real warm-image update-warm-image disk-usage prune-images prune-jobs prune-asset-cache clean
 
 up:            ## Build images and start the stack (detached)
 	docker compose up --build -d
@@ -33,6 +33,10 @@ test:          ## Submit the sample project and poll until it finishes
 
 test-generate: ## Submit tests/sample-generate to /generate and poll until it finishes
 	bash ./scripts/smoke_test_generate.sh
+
+test-webwork:  ## Build tests/sample-webwork (real mode): WeBWorK must render through the egress proxy
+	SAMPLE_DIR=$(CURDIR)/tests/sample-webwork PROJECT_ID=smoke-webwork \
+		FAIL_IF_LOG_MATCHES='Unable to generate webwork' bash ./scripts/smoke_test.sh
 
 pull-real:     ## Pre-pull the real PreTeXt image (~5GB) for real builds
 	docker pull pretextbook/pretext-full

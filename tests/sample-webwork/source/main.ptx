@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Checks build-time WeBWorK rendering through the egress proxy           -->
+<!-- (`make test-webwork`). Both problems are rendered by the WeBWorK server -->
+<!-- (webwork-ptx.aimath.org, the default): one from the Open Problem        -->
+<!-- Library, one authored here. Taken from PreTeXt's examples/webwork/minimal. -->
+<pretext>
+  <article xml:id="sample-webwork">
+    <title>WeBWorK Sample</title>
+    <section xml:id="sec-webwork">
+      <title>Problems</title>
+      <exercise label="add-integers">
+        <webwork>
+          <pg-code>
+            $a = Compute(random(1, 9, 1));
+            $b = Compute(random(1, 9, 1));
+            $c = $a + $b;
+          </pg-code>
+          <statement>
+            <p>
+              Compute the sum of <m><var name="$a" /></m> and <m><var name="$b" /></m>:
+            </p>
+            <p>
+              <m><var name="$a" /> + <var name="$b" /> =</m> <var name="$c" width="5" />
+            </p>
+          </statement>
+        </webwork>
+      </exercise>
+      <exercise label="cylinder-volume">
+        <webwork source="Library/PCC/BasicAlgebra/Geometry/CylinderVolume10.pg"/>
+      </exercise>
+    </section>
+  </article>
+</pretext>

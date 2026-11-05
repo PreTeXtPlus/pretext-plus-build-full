@@ -54,7 +54,7 @@ Next steps:
      allows port 443 ONLY from known IPs (your testing IP + whoever calls this
      server), and leaves port 80 open to everyone (Let's Encrypt needs it, and
      it never serves anything sensitive)
-  6. make up            # build + start caddy, api, worker, redis
+  6. make up            # build + start caddy, api, workers, redis, egress-proxy
   7. make test          # confirm a real build runs end-to-end
 
 Caddy (started by `make up`) handles TLS termination on 80/443; the API itself
